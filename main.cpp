@@ -43,7 +43,6 @@
 #include "get_option.h"
 
 #define REGISTRY_SETTINGS_LOCATION "Software\\Prey\\lock-screen"
-#define VERSION_STRING "lock-screen " VERSION_NUMBER_STRING " by Prey (tm) (c) 2015"
 
 #ifndef ERROR_ELEVATION_REQUIRED
 #define ERROR_ELEVATION_REQUIRED (740)
