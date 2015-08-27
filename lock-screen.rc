@@ -1,0 +1,60 @@
+/* Copyright (c) 2015 Jacob Lifshay, Fork Ltd.
+ * This file is part of Prey.
+ * 
+ * Prey is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * Prey is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with Prey.  If not, see <http://www.gnu.org/licenses/>.
+ */
+#include <windows.h>
+#include "resources.h"
+IDI_MAIN_ICON ICON "res/icon.ico"
+IDI_KEYBOARD ICON "res/keyboard.ico"
+#ifdef DEBUG
+1 MANIFEST "res/debug.manifest"
+#else
+1 MANIFEST "res/release.manifest"
+#endif
+IDB_BACKGROUND BITMAP "res/background.bmp"
+IDB_BACKGROUND_ERROR BITMAP "res/background-error.bmp"
+
+VS_VERSION_INFO    VERSIONINFO
+FILEVERSION        VERSION_NUMBER_COMMAS
+PRODUCTVERSION     VERSION_NUMBER_COMMAS
+FILEFLAGSMASK      VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+FILEFLAGS        VS_FF_DEBUG | VS_FF_PRERELEASE
+#else
+FILEFLAGS        0
+#endif
+FILEOS             VOS_NT_WINDOWS32
+FILETYPE           VFT_APP
+FILESUBTYPE        VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Fork, Ltd."
+      VALUE "FileDescription", "Fullscreen Lock"
+      VALUE "FileVersion", VERSION_NUMBER_STRING
+      VALUE "InternalName", "lock-screen"
+      VALUE "LegalCopyright", "(c) 2014-2015 Fork, Ltd."
+      VALUE "OriginalFilename", "screen-lock.exe"
+      VALUE "ProductName", "Fullscreen Lock"
+      VALUE "ProductVersion", VERSION_NUMBER_STRING
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

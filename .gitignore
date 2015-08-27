@@ -1,0 +1,8 @@
+*~
+*.save
+bin
+obj
+*.depend
+*.layout
+*.bak
+*.zip
