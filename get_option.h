@@ -46,6 +46,7 @@
 #include <vector>
 #include <functional>
 #include <utility>
+#include <algorithm>
 
 /** getopt implementation
  * @note Doesn't support getopt_long_only.
@@ -66,6 +67,7 @@ public:
 private:
     std::size_t optindInternal;
     bool startedParse;
+    std::size_t firstReorderedArgument;
 public:
     std::function<void(string_type)> opterr; /// error message display function; can be empty (eg. nullptr)
     int_type optopt;
@@ -79,6 +81,7 @@ public:
     explicit basic_get_option(std::function<void(string_type)> opterr = nullptr, std::size_t optind = 1)
         : optindInternal(optind),
           startedParse(false),
+          firstReorderedArgument(string_type::npos),
           opterr(opterr),
           optopt(traits_type::to_char_type(static_cast<int_type>('?'))),
           optind(optind),
@@ -159,6 +162,7 @@ private:
         {
             startedParse = true;
             optindInternal = optind;
+            firstReorderedArgument = string_type::npos;
         }
 
         optarg.clear();
@@ -331,7 +335,7 @@ private:
                             return o.val;
                         }
 
-                        optarg = arg.substr(equalPosition);
+                        optarg = arg.substr(equalPosition + 1);
                         has_arg = true;
                         optindInternal++;
                         optind = optindInternal;
@@ -351,7 +355,7 @@ private:
                         if(equalPosition != string_type::npos)
                         {
                             has_arg = true;
-                            optarg = arg.substr(equalPosition);
+                            optarg = arg.substr(equalPosition + 1);
                         }
 
                         optindInternal++;
@@ -468,13 +472,19 @@ private:
             std::size_t nextOptionIndex;
             for(nextOptionIndex = optindInternal + 1; nextOptionIndex < args.size(); nextOptionIndex++)
             {
+                if(nextOptionIndex >= firstReorderedArgument)
+                {
+                    nextOptionIndex = args.size();
+                    break;
+                }
                 if(args[nextOptionIndex].size() >= 2 && eq_char(args[nextOptionIndex].front(), '-'))
                 {
-                    for(std::size_t i = optindInternal; i < nextOptionIndex; i++)
+                    if(firstReorderedArgument == string_type::npos)
                     {
-                        using std::swap;
-                        swap(args[i], args[i + 1]);
+                        firstReorderedArgument = args.size();
                     }
+                    std::rotate(args.begin() + optindInternal, args.begin() + nextOptionIndex, args.begin() + firstReorderedArgument);
+                    firstReorderedArgument -= nextOptionIndex - optindInternal;
                     break;
                 }
             }
@@ -482,6 +492,10 @@ private:
             {
                 break;
             }
+        }
+        if(firstReorderedArgument != string_type::npos && firstReorderedArgument != args.size())
+        {
+            std::rotate(args.begin() + optindInternal, args.begin() + firstReorderedArgument, args.end());
         }
         optind = optindInternal;
         return end_flag();
