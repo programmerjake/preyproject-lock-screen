@@ -1,16 +1,16 @@
 :: Copyright (c) 2015 Jacob Lifshay, Fork Ltd.
 :: This file is part of Prey.
-:: 
+::
 :: Prey is free software: you can redistribute it and/or modify
 :: it under the terms of the GNU General Public License as published by
 :: the Free Software Foundation, either version 3 of the License, or
 :: (at your option) any later version.
-:: 
+::
 :: Prey is distributed in the hope that it will be useful,
 :: but WITHOUT ANY WARRANTY; without even the implied warranty of
 :: MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 :: GNU General Public License for more details.
-:: 
+::
 :: You should have received a copy of the GNU General Public License
 :: along with Prey.  If not, see <http://www.gnu.org/licenses/>.
 ::
@@ -34,7 +34,7 @@
 :ZipSource
 @shift
 move /Y lock-screen-src.zip lock-screen-src.zip.bak 2>NUL
-zip lock-screen-src.zip -r external_libs res build.cmd *.cpp *.c *.h *.cbp *.rc 
+zip lock-screen-src.zip -r external_libs res build.cmd *.cpp *.c *.h *.cbp *.rc
 @goto parseargs
 
 :ZipAll
