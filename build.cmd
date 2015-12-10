@@ -77,8 +77,9 @@ g++ -m32 -Lexternal_libs -o bin\Debug-x86\lock-screen.exe obj\Debug-x86\main.o o
 @shift
 @md obj\Release-x86 2>NUL
 windres -J rc -O coff -i lock-screen.rc -o obj\Release-x86\lock-screen.res
+g++ -m32 --std=c++11 -Lexternal_libs -c persistent.cpp -o obj\Release-x86\persistent.o -static -Os -ffunction-sections -fdata-sections -Wl,--gc-sections -lpropsys_x86 -w -lwtsapi32 -luserenv
 g++ -m32 -Wall -std=c++11 -municode -O2 -c main.cpp -o obj\Release-x86\main.o
 gcc -m32 -Wall -municode -O2 -c md5.c -o obj\Release-x86\md5.o
 @md bin\Release-x86 2>NUL
-g++ -m32 -Lexternal_libs -o bin\Release-x86\lock-screen.exe obj\Release-x86\main.o obj\Release-x86\md5.o obj\Release-x86\lock-screen.res -municode -static -s -lgdi32 -luser32 -lkernel32 -lcomctl32 -lole32 -lpropsys_x86
+g++ -m32 -Lexternal_libs -o bin\Release-x86\lock-screen.exe obj\Release-x86\main.o obj\Release-x86\md5.o obj\Release-x86\persistent.o obj\Release-x86\lock-screen.res -municode -static -s -lgdi32 -luser32 -lkernel32 -lcomctl32 -lole32 -lpropsys_x86 -lwtsapi32 -luserenv
 @goto parseargs

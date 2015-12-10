@@ -1,16 +1,16 @@
 /* Copyright (c) 2015 Jacob Lifshay, Fork Ltd.
  * This file is part of Prey.
- * 
+ *
  * Prey is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * Prey is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with Prey.  If not, see <http://www.gnu.org/licenses/>.
  */
@@ -21,9 +21,11 @@
 #elif !defined(UNICODE) && defined(_UNICODE)
 #define UNICODE
 #endif
-#include <tchar.h>
 #define NOMINMAX
 #include <windows.h>
+#include <wtsapi32.h>
+#include <tchar.h>
+#include <sddl.h>
 #include <propsys.h>
 #include <propkey.h>
 #include <shellapi.h>
@@ -38,6 +40,7 @@
 #include <iostream>
 #include <initializer_list>
 #include "resources.h"
+#include "persistent.h"
 #include "md5.h"
 #include "string_cast.h"
 #include "get_option.h"
@@ -66,253 +69,169 @@ typedef get_option tget_option;
 #define Tcerr (::std::cerr)
 #endif // UNICODE
 
-template <typename Fn>
+  template <typename Fn>
 BOOL CALLBACK EnumDisplayMonitorsHelper(HMONITOR monitor, HDC monitorDC, LPRECT pMonitorRect, LPARAM arg)
 {
-    Fn &f = *(Fn *)arg;
-    return f(monitor, monitorDC, pMonitorRect);
+  Fn &f = *(Fn *)arg;
+  return f(monitor, monitorDC, pMonitorRect);
 }
 
-template <typename Fn>
+  template <typename Fn>
 BOOL EnumDisplayMonitors(HDC dc, LPCRECT pClipRect, Fn fn)
 {
-    return ::EnumDisplayMonitors(dc, pClipRect, &EnumDisplayMonitorsHelper<Fn>, (LPARAM)std::addressof(fn));
+  return ::EnumDisplayMonitors(dc, pClipRect, &EnumDisplayMonitorsHelper<Fn>, (LPARAM)std::addressof(fn));
 }
 
-template <typename Fn>
+  template <typename Fn>
 BOOL CALLBACK EnumWindowsHelper(HWND window, LPARAM arg)
 {
-    Fn &f = *(Fn *)arg;
-    return f(window);
+  Fn &f = *(Fn *)arg;
+  return f(window);
 }
 
-template <typename Fn>
+  template <typename Fn>
 BOOL EnumWindows(Fn fn)
 {
-    return ::EnumWindows(&EnumWindowsHelper<Fn>, (LPARAM)std::addressof(fn));
+  return ::EnumWindows(&EnumWindowsHelper<Fn>, (LPARAM)std::addressof(fn));
 }
 
 class MD5 final
 {
-public:
+  public:
     struct Hash final
     {
-        static constexpr std::size_t dataSize = 16;
-        std::uint8_t data[dataSize];
-        static bool parse(tstring str, Hash &retval)
-        {
-            if(str.size() != 2 * dataSize)
-                return false;
+      static constexpr std::size_t dataSize = 16;
+      std::uint8_t data[dataSize];
+      static bool parse(tstring str, Hash &retval)
+      {
+        if(str.size() != 2 * dataSize)
+          return false;
 
-            for(std::size_t i = 0; i < dataSize; i++)
-            {
-                if((char)str[i * 2] != str[i * 2] || !std::isxdigit((char)str[i * 2]))
-                {
-                    return false;
-                }
-
-                if((char)str[i * 2 + 1] != str[i * 2 + 1] || !std::isxdigit((char)str[i * 2 + 1]))
-                {
-                    return false;
-                }
-
-                tistringstream ss(str.substr(i * 2, 2));
-                int v;
-                ss >> std::hex >> v;
-                retval.data[i] = v;
-            }
-
-            return true;
-        }
-        bool operator ==(const Hash &rt) const
+        for(std::size_t i = 0; i < dataSize; i++)
         {
-            for(std::size_t i = 0; i < dataSize; i++)
-            {
-                if(data[i] != rt.data[i])
-                {
-                    return false;
-                }
-            }
+          if((char)str[i * 2] != str[i * 2] || !std::isxdigit((char)str[i * 2]))
+          {
+            return false;
+          }
 
-            return true;
+          if((char)str[i * 2 + 1] != str[i * 2 + 1] || !std::isxdigit((char)str[i * 2 + 1]))
+          {
+            return false;
+          }
+
+          tistringstream ss(str.substr(i * 2, 2));
+          int v;
+          ss >> std::hex >> v;
+          retval.data[i] = v;
         }
-        bool operator !=(const Hash &rt) const
+
+        return true;
+      }
+      bool operator ==(const Hash &rt) const
+      {
+        for(std::size_t i = 0; i < dataSize; i++)
         {
-            return !operator ==(rt);
+          if(data[i] != rt.data[i])
+          {
+            return false;
+          }
         }
-        friend std::ostream &operator <<(std::ostream &os, const Hash &v)
+
+        return true;
+      }
+      bool operator !=(const Hash &rt) const
+      {
+        return !operator ==(rt);
+      }
+      friend std::ostream &operator <<(std::ostream &os, const Hash &v)
+      {
+        std::ostringstream ss;
+        ss << std::hex;
+        for(std::size_t i = 0; i < dataSize; i++)
         {
-            std::ostringstream ss;
-            ss << std::hex;
-            for(std::size_t i = 0; i < dataSize; i++)
-            {
-                ss << (int)v.data[i] / 0x10 << (int)v.data[i] % 0x10;
-            }
-            return os << ss.str();
+          ss << (int)v.data[i] / 0x10 << (int)v.data[i] % 0x10;
         }
-        friend std::wostream &operator <<(std::wostream &os, const Hash &v)
+        return os << ss.str();
+      }
+      friend std::wostream &operator <<(std::wostream &os, const Hash &v)
+      {
+        std::wostringstream ss;
+        ss << std::hex;
+        for(std::size_t i = 0; i < dataSize; i++)
         {
-            std::wostringstream ss;
-            ss << std::hex;
-            for(std::size_t i = 0; i < dataSize; i++)
-            {
-                ss << (int)v.data[i] / 0x10 << (int)v.data[i] % 0x10;
-            }
-            return os << ss.str();
+          ss << (int)v.data[i] / 0x10 << (int)v.data[i] % 0x10;
         }
+        return os << ss.str();
+      }
     };
     static MD5 make()
     {
-        return MD5();
+      return MD5();
     }
     MD5 &append(const std::uint8_t *bytes, std::size_t length) &
     {
-        if(length == 0)
-            return *this;
-
-        const std::size_t maxChunkSize = (std::size_t)INT_MAX / 2;
-
-        while(length > maxChunkSize)
-        {
-            md5_append(&state, bytes, maxChunkSize);
-            length -= maxChunkSize;
-            bytes += maxChunkSize;
-        }
-
-        md5_append(&state, bytes, length);
+      if(length == 0)
         return *this;
+
+      const std::size_t maxChunkSize = (std::size_t)INT_MAX / 2;
+
+      while(length > maxChunkSize)
+      {
+        md5_append(&state, bytes, maxChunkSize);
+        length -= maxChunkSize;
+        bytes += maxChunkSize;
+      }
+
+      md5_append(&state, bytes, length);
+      return *this;
     }
     MD5 &&append(const std::uint8_t *bytes, std::size_t length) &&
     {
-        MD5 &v = *this;
-        return std::move(v.append(bytes, length));
+      MD5 &v = *this;
+      return std::move(v.append(bytes, length));
     }
     Hash finish()
     {
-        Hash retval;
-        md5_finish(&state, retval.data);
-        return retval;
+      Hash retval;
+      md5_finish(&state, retval.data);
+      return retval;
     }
     static Hash hash(const std::uint8_t *bytes, std::size_t length)
     {
-        return make().append(bytes, length).finish();
+      return make().append(bytes, length).finish();
     }
-private:
+  private:
     MD5()
     {
-        md5_init(&state);
+      md5_init(&state);
     }
     md5_state_t state;
 };
 
 MD5::Hash hashPassword(tstring password)
 {
-    std::string utf8password = string_cast<std::string>(password);
-    return MD5::hash((const std::uint8_t *)utf8password.data(), utf8password.size());
+  std::string utf8password = string_cast<std::string>(password);
+  return MD5::hash((const std::uint8_t *)utf8password.data(), utf8password.size());
 }
 
 struct Window final
 {
-    HWND window;
-    bool isPrimary;
-    Window(bool isPrimary = false)
-        : window(NULL),
-          isPrimary(isPrimary)
-    {
-    }
-};
-
-struct PersistentSystemOptions final
-{
-    bool hasLockComputer;
-    bool hasSwitchUser;
-    bool hasLogOff;
-    bool hasChangePassword;
-    bool hasTaskManager;
-    bool hasPower;
-    bool hasFilterKeysHotkey;
-    bool hasMouseKeysHotkey;
-    bool hasStickyKeysHotkey;
-    bool hasToggleKeysHotkey;
-    bool hasHighContrastHotkey;
-    PersistentSystemOptions(bool enabled = true)
-        : hasLockComputer(enabled),
-          hasSwitchUser(enabled),
-          hasLogOff(enabled),
-          hasChangePassword(enabled),
-          hasTaskManager(enabled),
-          hasPower(enabled),
-          hasFilterKeysHotkey(enabled),
-          hasMouseKeysHotkey(enabled),
-          hasStickyKeysHotkey(enabled),
-          hasToggleKeysHotkey(enabled),
-          hasHighContrastHotkey(enabled)
-    {
-    }
-    static PersistentSystemOptions AllDisabled()
-    {
-        return PersistentSystemOptions(false);
-    }
-    static PersistentSystemOptions AllEnabled()
-    {
-        return PersistentSystemOptions(true);
-    }
-    static PersistentSystemOptions ReadSystemSettings();
-    bool WriteSystemSettings() const;
-    static PersistentSystemOptions ReadFromStorage();
-    bool WriteToStorage() const;
-    std::ostream &Dump(std::ostream &os) const
-    {
-        os << "hasLockComputer = " << (hasLockComputer ? "true\n" : "false\n");
-        os << "hasSwitchUser = " << (hasSwitchUser ? "true\n" : "false\n");
-        os << "hasLogOff = " << (hasLogOff ? "true\n" : "false\n");
-        os << "hasChangePassword = " << (hasChangePassword ? "true\n" : "false\n");
-        os << "hasTaskManager = " << (hasTaskManager ? "true\n" : "false\n");
-        os << "hasPower = " << (hasPower ? "true\n" : "false\n");
-        os << "hasFilterKeysHotkey = " << (hasFilterKeysHotkey ? "true\n" : "false\n");
-        os << "hasMouseKeysHotkey = " << (hasMouseKeysHotkey ? "true\n" : "false\n");
-        os << "hasStickyKeysHotkey = " << (hasStickyKeysHotkey ? "true\n" : "false\n");
-        os << "hasToggleKeysHotkey = " << (hasToggleKeysHotkey ? "true\n" : "false\n");
-        os << "hasHighContrastHotkey = " << (hasHighContrastHotkey ? "true\n" : "false\n");
-        return os;
-    }
-    std::wostream &Dump(std::wostream &os) const
-    {
-        os << L"hasLockComputer = " << (hasLockComputer ? L"true\n" : L"false\n");
-        os << L"hasSwitchUser = " << (hasSwitchUser ? L"true\n" : L"false\n");
-        os << L"hasLogOff = " << (hasLogOff ? L"true\n" : L"false\n");
-        os << L"hasChangePassword = " << (hasChangePassword ? L"true\n" : L"false\n");
-        os << L"hasTaskManager = " << (hasTaskManager ? L"true\n" : L"false\n");
-        os << L"hasPower = " << (hasPower ? L"true\n" : L"false\n");
-        os << L"hasFilterKeysHotkey = " << (hasFilterKeysHotkey ? L"true\n" : L"false\n");
-        os << L"hasMouseKeysHotkey = " << (hasMouseKeysHotkey ? L"true\n" : L"false\n");
-        os << L"hasStickyKeysHotkey = " << (hasStickyKeysHotkey ? L"true\n" : L"false\n");
-        os << L"hasToggleKeysHotkey = " << (hasToggleKeysHotkey ? L"true\n" : L"false\n");
-        os << L"hasHighContrastHotkey = " << (hasHighContrastHotkey ? L"true\n" : L"false\n");
-        return os;
-    }
-private:
-    static bool ReadRegistryKey(HKEY baseHive, tstring path, tstring name, bool defaultValue);
-    static bool WriteRegistryKey(HKEY baseHive, tstring path, tstring name, bool value);
-    static bool ReadFilterKeysHotkey();
-    static bool WriteFilterKeysHotkey(bool value);
-    static bool ReadMouseKeysHotkey();
-    static bool WriteMouseKeysHotkey(bool value);
-    static bool ReadStickyKeysHotkey();
-    static bool WriteStickyKeysHotkey(bool value);
-    static bool ReadToggleKeysHotkey();
-    static bool WriteToggleKeysHotkey(bool value);
-    static bool ReadHighContrastHotkey();
-    static bool WriteHighContrastHotkey(bool value);
+  HWND window;
+  bool isPrimary;
+  Window(bool isPrimary = false)
+    : window(NULL),
+    isPrimary(isPrimary)
+  {
+  }
 };
 
 class Application final
 {
-private:
+  private:
     struct CreateData final
     {
-        Window initWindow;
-        Application *application;
+      Window initWindow;
+      Application *application;
     };
     static LRESULT CALLBACK StaticWindowProcedure(HWND window, UINT messageId, WPARAM wParam, LPARAM lParam);
     LRESULT WindowProcedure(Window &window, UINT messageId, WPARAM wParam, LPARAM lParam);
@@ -335,7 +254,6 @@ private:
     static constexpr UINT backgroundImageControlId = 103;
     HHOOK keyboardHook;
     HICON keyboardIcon;
-    PersistentSystemOptions persistentSystemOptions;
     MD5::Hash hashedPassword;
     bool debugPassword = false;
     tstring commandLine;
@@ -345,892 +263,821 @@ private:
     bool verbose = false;
     enum class Action
     {
-        LockScreen,
-        Default = LockScreen,
-        Block,
-        Unblock,
-        Save,
-        ForceUnblock,
-        Version,
-        Dump,
+      LockScreen,
+      Default = LockScreen,
+      Block,
+      Unblock,
+      Save,
+      ForceUnblock,
+      Version,
+      Dump,
     };
-public:
+  public:
     Application(HINSTANCE instance, tstring commandLine, int nCmdShow)
-        : instance(instance),
-          nCmdShow(nCmdShow),
-          commandLine(commandLine)
-    {
-    }
+      : instance(instance),
+      nCmdShow(nCmdShow),
+      commandLine(commandLine)
+  {
+  }
     int operator()();
 };
 
 int WINAPI _tWinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPTSTR lpszArgument, int nCmdShow)
 {
-    return Application(hThisInstance, lpszArgument, nCmdShow)();
+  return Application(hThisInstance, lpszArgument, nCmdShow)();
 }
 
 bool Application::ParseArgumentsAndCheckForHelpOption()
 {
-    tstring programName;
-    programName.reserve(128);
-    programName.resize(64);
-    DWORD programNameSize = programName.size();
+  tstring programName;
+  programName.reserve(128);
+  programName.resize(64);
+  DWORD programNameSize = programName.size();
 
-    do
+  do
+  {
+    programNameSize = GetModuleFileName(NULL, &programName[0], programName.size());
+
+    if(!programNameSize)
     {
-        programNameSize = GetModuleFileName(NULL, &programName[0], programName.size());
-
-        if(!programNameSize)
-        {
-            break;
-        }
-
-        programName.resize(programName.size() * 2);
-    }
-    while(programNameSize + 1 >= programName.size());
-
-    programName.resize(programNameSize);
-    args.assign(1, programName);
-    bool inQuotedString = false;
-    bool gotAnything = false;
-    bool gotOptionSlash = false;
-    bool isHelpOption = false;
-    bool startNewArg = true;
-    std::size_t backslashCount = 0;
-    auto parseChar = [&](_TINT ch)->void
-    {
-        if(ch == _T('\\'))
-        {
-            gotAnything = true;
-            gotOptionSlash = false;
-            isHelpOption = false;
-            backslashCount++;
-            return;
-        }
-
-        if(ch == _T('\"'))
-        {
-            gotAnything = true;
-            gotOptionSlash = false;
-            isHelpOption = false;
-
-            if(startNewArg)
-            {
-                startNewArg = false;
-                args.emplace_back();
-            }
-
-            if(backslashCount % 2 != 0)
-            {
-                args.back().append(backslashCount / 2, _T('\\'));
-                backslashCount = 0;
-                args.back() += _T('\"');
-                return;
-            }
-
-            args.back().append(backslashCount / 2, _T('\\'));
-            backslashCount = 0;
-            inQuotedString = !inQuotedString;
-        }
-
-        if(backslashCount > 0)
-        {
-            if(startNewArg)
-            {
-                startNewArg = false;
-                args.emplace_back();
-            }
-
-            args.back().append(backslashCount, _T('\\'));
-            backslashCount = 0;
-        }
-
-        if(ch == _TEOF)
-            return;
-
-        if(inQuotedString)
-        {
-            args.back() += ch;
-            return;
-        }
-
-        if(!gotAnything)
-        {
-            if(ch == _T(' ') || ch == _T('\t'))
-            {
-                return;
-            }
-
-            gotAnything = true;
-
-            if(startNewArg)
-            {
-                startNewArg = false;
-                args.emplace_back();
-            }
-
-            args.back() += ch;
-
-            if(ch == _T('/'))
-                gotOptionSlash = true;
-
-            return;
-        }
-
-        if(gotOptionSlash && ch == _T('?'))
-        {
-            gotOptionSlash = false;
-
-            if(startNewArg)
-            {
-                startNewArg = false;
-                args.emplace_back();
-            }
-
-            args.back() += ch;
-            isHelpOption = true;
-            return;
-        }
-
-        if(ch == _T(' ') || ch == _T('\t'))
-        {
-            startNewArg = true;
-            return;
-        }
-
-        gotOptionSlash = false;
-        isHelpOption = false;
-
-        if(startNewArg)
-        {
-            startNewArg = false;
-            args.emplace_back();
-        }
-
-        args.back() += ch;
-    };
-
-    for(TCHAR ch : commandLine)
-    {
-        parseChar(ch);
+      break;
     }
 
-    parseChar(_TEOF);
+    programName.resize(programName.size() * 2);
+  }
+  while(programNameSize + 1 >= programName.size());
 
-    return isHelpOption;
+  programName.resize(programNameSize);
+  args.assign(1, programName);
+  bool inQuotedString = false;
+  bool gotAnything = false;
+  bool gotOptionSlash = false;
+  bool isHelpOption = false;
+  bool startNewArg = true;
+  std::size_t backslashCount = 0;
+  auto parseChar = [&](_TINT ch)->void
+  {
+    if(ch == _T('\\'))
+    {
+      gotAnything = true;
+      gotOptionSlash = false;
+      isHelpOption = false;
+      backslashCount++;
+      return;
+    }
+
+    if(ch == _T('\"'))
+    {
+      gotAnything = true;
+      gotOptionSlash = false;
+      isHelpOption = false;
+
+      if(startNewArg)
+      {
+        startNewArg = false;
+        args.emplace_back();
+      }
+
+      if(backslashCount % 2 != 0)
+      {
+        args.back().append(backslashCount / 2, _T('\\'));
+        backslashCount = 0;
+        args.back() += _T('\"');
+        return;
+      }
+
+      args.back().append(backslashCount / 2, _T('\\'));
+      backslashCount = 0;
+      inQuotedString = !inQuotedString;
+    }
+
+    if(backslashCount > 0)
+    {
+      if(startNewArg)
+      {
+        startNewArg = false;
+        args.emplace_back();
+      }
+
+      args.back().append(backslashCount, _T('\\'));
+      backslashCount = 0;
+    }
+
+    if(ch == _TEOF)
+      return;
+
+    if(inQuotedString)
+    {
+      args.back() += ch;
+      return;
+    }
+
+    if(!gotAnything)
+    {
+      if(ch == _T(' ') || ch == _T('\t'))
+      {
+        return;
+      }
+
+      gotAnything = true;
+
+      if(startNewArg)
+      {
+        startNewArg = false;
+        args.emplace_back();
+      }
+
+      args.back() += ch;
+
+      if(ch == _T('/'))
+        gotOptionSlash = true;
+
+      return;
+    }
+
+    if(gotOptionSlash && ch == _T('?'))
+    {
+      gotOptionSlash = false;
+
+      if(startNewArg)
+      {
+        startNewArg = false;
+        args.emplace_back();
+      }
+
+      args.back() += ch;
+      isHelpOption = true;
+      return;
+    }
+
+    if(ch == _T(' ') || ch == _T('\t'))
+    {
+      startNewArg = true;
+      return;
+    }
+
+    gotOptionSlash = false;
+    isHelpOption = false;
+
+    if(startNewArg)
+    {
+      startNewArg = false;
+      args.emplace_back();
+    }
+
+    args.back() += ch;
+  };
+
+  for(TCHAR ch : commandLine)
+  {
+    parseChar(ch);
+  }
+
+  parseChar(_TEOF);
+
+  return isHelpOption;
 }
 
 int Application::operator()()
 {
-    tstring password;
+  tstring password;
 
-    bool isHelpOption = ParseArgumentsAndCheckForHelpOption();
+  bool isHelpOption = ParseArgumentsAndCheckForHelpOption();
 
-    Action action = Action::LockScreen;
-    std::size_t actionSpecificationCount = 0;
-    tstring dumpFileName = _T("-");
-    bool writeHelpToStdErr = false;
-    bool tooManyArguments = false;
+  Action action = Action::LockScreen;
+  std::size_t actionSpecificationCount = 0;
+  tstring dumpFileName = _T("-");
+  bool writeHelpToStdErr = false;
+  bool tooManyArguments = false;
 
-    if(!isHelpOption)
+  if(!isHelpOption)
+  {
+    const std::vector<tget_option::option> options = std::initializer_list<tget_option::option>
     {
-        const std::vector<tget_option::option> options = std::initializer_list<tget_option::option>
+      tget_option::option{_T("help"), tget_option::argument::no, nullptr, _T('h')},
+        tget_option::option{_T("block"), tget_option::argument::no, nullptr, _T('b')},
+        tget_option::option{_T("unblock"), tget_option::argument::no, nullptr, _T('u')},
+        tget_option::option{_T("save"), tget_option::argument::no, nullptr, _T('s')},
+        tget_option::option{_T("force-unblock"), tget_option::argument::no, nullptr, _T('U')},
+        tget_option::option{_T("version"), tget_option::argument::no, nullptr, _T('V')},
+        tget_option::option{_T("verbose"), tget_option::argument::no, nullptr, _T('v')},
+        tget_option::option{_T("dump"), tget_option::argument::optional, nullptr, _T('d')},
+    };
+    _TINT opt;
+    tget_option optionParser([&](tstring msg)
         {
-            tget_option::option{_T("help"), tget_option::argument::no, nullptr, _T('h')},
-            tget_option::option{_T("block"), tget_option::argument::no, nullptr, _T('b')},
-            tget_option::option{_T("unblock"), tget_option::argument::no, nullptr, _T('u')},
-            tget_option::option{_T("save"), tget_option::argument::no, nullptr, _T('s')},
-            tget_option::option{_T("force-unblock"), tget_option::argument::no, nullptr, _T('U')},
-            tget_option::option{_T("version"), tget_option::argument::no, nullptr, _T('V')},
-            tget_option::option{_T("verbose"), tget_option::argument::no, nullptr, _T('v')},
-            tget_option::option{_T("dump"), tget_option::argument::optional, nullptr, _T('d')},
-        };
-        _TINT opt;
-        tget_option optionParser([&](tstring msg)
-        {
-            Tcerr << _T("lock-screen: ") << msg << std::endl;
-            writeHelpToStdErr = true;
+        Tcerr << _T("lock-screen: ") << msg << std::endl;
+        writeHelpToStdErr = true;
         });
 
-        while((opt = optionParser.getopt_long(args, _T("hbusUvd::"), options, nullptr)) != optionParser.end_flag())
-        {
-            switch(opt)
-            {
-            case _T('h'):
-                isHelpOption = true;
-                break;
+    while((opt = optionParser.getopt_long(args, _T("hbusUvd::"), options, nullptr)) != optionParser.end_flag())
+    {
+      switch(opt)
+      {
+        case _T('h'):
+          isHelpOption = true;
+          break;
 
-            case _T('b'):
-                action = Action::Block;
-                actionSpecificationCount++;
-                break;
+        case _T('b'):
+          action = Action::Block;
+          actionSpecificationCount++;
+          break;
 
-            case _T('u'):
-                action = Action::Unblock;
-                actionSpecificationCount++;
-                break;
+        case _T('u'):
+          action = Action::Unblock;
+          actionSpecificationCount++;
+          break;
 
-            case _T('s'):
-                action = Action::Save;
-                actionSpecificationCount++;
-                break;
+        case _T('s'):
+          action = Action::Save;
+          actionSpecificationCount++;
+          break;
 
-            case _T('U'):
-                action = Action::ForceUnblock;
-                actionSpecificationCount++;
-                break;
+        case _T('U'):
+          action = Action::ForceUnblock;
+          actionSpecificationCount++;
+          break;
 
-            case _T('V'):
-                action = Action::Version;
-                actionSpecificationCount++;
-                break;
+        case _T('V'):
+          action = Action::Version;
+          actionSpecificationCount++;
+          break;
 
-            case _T('d'):
-                action = Action::Dump;
-                actionSpecificationCount++;
+        case _T('d'):
+          action = Action::Dump;
+          actionSpecificationCount++;
 
-                if(optionParser.has_arg)
-                {
-                    dumpFileName = optionParser.optarg;
-                }
+          if(optionParser.has_arg)
+          {
+            dumpFileName = optionParser.optarg;
+          }
 
-                break;
+          break;
 
-            case _T('v'):
-                verbose = true;
-                break;
+        case _T('v'):
+          verbose = true;
+          break;
 
-            default:
-                isHelpOption = true;
-                writeHelpToStdErr = true;
-                break;
-            }
-        }
-
-        std::size_t argumentsLeft = args.size() - optionParser.optind;
-        if(actionSpecificationCount > 0)
-        {
-            if(argumentsLeft > 0)
-            {
-                tooManyArguments = true;
-            }
-        }
-        else if(argumentsLeft > 1)
-        {
-            tooManyArguments = true;
-        }
-        else if(argumentsLeft == 1)
-        {
-            password = args[optionParser.optind];
-        }
+        default:
+          isHelpOption = true;
+          writeHelpToStdErr = true;
+          break;
+      }
     }
 
-    if(!isHelpOption)
+    std::size_t argumentsLeft = args.size() - optionParser.optind;
+    if(actionSpecificationCount > 0)
     {
-        if(actionSpecificationCount > 1)
-        {
-            Tcerr << _T("lock-screen: multiple actions specified") << std::endl;
-            isHelpOption = true;
-            writeHelpToStdErr = true;
-        }
-        else if(tooManyArguments)
-        {
-            Tcerr << _T("lock-screen: too many arguments") << std::endl;
-            isHelpOption = true;
-            writeHelpToStdErr = true;
-        }
+      if(argumentsLeft > 0)
+      {
+        tooManyArguments = true;
+      }
     }
-
-    if(isHelpOption)
+    else if(argumentsLeft > 1)
     {
-        const LPCTSTR helpMessage = _T(""
-                "Usage:\tlock-screen [<options>]\n"
-                "\tlock-screen <password>\n"
-                "\tlock-screen <MD5-hashed password>\n"
-                "\n"
-                "Action-Options: \n"
-                "-b,--block\t\t\tSave, then block the\n"
-                "\t\t\t\tpersistent lock-screen settings.\n"
-                "\n"
-                "-d,--dump [<output file>]\tDisplay the persistent lock-screen settings.\n"
-                "\n"
-                "-s,--save\t\t\tSave the persistent lock-screen settings.\n"
-                "\n"
-                "-u,--unblock\t\t\tRestore the persistent lock-screen settings.\n"
-                "\n"
-                "-U,--force-unblock\t\tReset the persistent lock-screen settings.\n"
-                "\n"
-                "--version\t\t\tDisplay version information.\n"
-                "\n"
-                "Options: \n"
-                "-h,--help,/?\t\t\tShow this help.\n"
-                "\n"
-                "-v,--verbose\t\t\tEnable verbosity.\n");
-        if(writeHelpToStdErr)
-        {
-            Tcerr << helpMessage;
-            return 1;
-        }
-        Tcout << helpMessage;
-        return 0;
+      tooManyArguments = true;
     }
-
-    switch(action)
+    else if(argumentsLeft == 1)
     {
+      password = args[optionParser.optind];
+    }
+  }
+
+  if(!isHelpOption)
+  {
+    if(actionSpecificationCount > 1)
+    {
+      Tcerr << _T("lock-screen: multiple actions specified") << std::endl;
+      isHelpOption = true;
+      writeHelpToStdErr = true;
+    }
+    else if(tooManyArguments)
+    {
+      Tcerr << _T("lock-screen: too many arguments") << std::endl;
+      isHelpOption = true;
+      writeHelpToStdErr = true;
+    }
+  }
+
+  if(isHelpOption)
+  {
+    const LPCTSTR helpMessage = _T(""
+        "Usage:\tlock-screen [<options>]\n"
+        "\tlock-screen <password>\n"
+        "\tlock-screen <MD5-hashed password>\n"
+        "\n"
+        "Action-Options: \n"
+        "-b,--block\t\t\tSave, then block the\n"
+        "\t\t\t\tpersistent lock-screen settings.\n"
+        "\n"
+        "-d,--dump [<output file>]\tDisplay the persistent lock-screen settings.\n"
+        "\n"
+        "-s,--save\t\t\tSave the persistent lock-screen settings.\n"
+        "\n"
+        "-u,--unblock\t\t\tRestore the persistent lock-screen settings.\n"
+        "\n"
+        "-U,--force-unblock\t\tReset the persistent lock-screen settings.\n"
+        "\n"
+        "--version\t\t\tDisplay version information.\n"
+        "\n"
+        "Options: \n"
+        "-h,--help,/?\t\t\tShow this help.\n"
+        "\n"
+        "-v,--verbose\t\t\tEnable verbosity.\n");
+    if(writeHelpToStdErr)
+    {
+      Tcerr << helpMessage;
+      return 1;
+    }
+    Tcout << helpMessage;
+    return 0;
+  }
+
+  switch(action)
+  {
     case Action::LockScreen:
-        break;
+      break;
     case Action::Block:
-    {
-        persistentSystemOptions = PersistentSystemOptions::ReadSystemSettings();
-        if(verbose)
-        {
-            Tcout << _T("Read persistent system options:") << std::endl;
-            persistentSystemOptions.Dump(Tcout);
+      {
+        if(action_block()) {
+          return 0;
         }
-        bool succeded = persistentSystemOptions.WriteToStorage();
-        if(verbose)
-        {
-            if(succeded)
-                Tcout << _T("Saved persistent system options.") << std::endl;
-            else
-                Tcout << _T("Saving persistent system options failed.") << std::endl;
-        }
-        if(!succeded)
-            return 1;
-        succeded = PersistentSystemOptions::AllDisabled().WriteSystemSettings();
-        if(verbose)
-        {
-            if(succeded)
-                Tcout << _T("Blocked persistent system options.") << std::endl;
-            else
-                Tcout << _T("Blocking persistent system options failed.") << std::endl;
-        }
-        if(!succeded)
-            return 1;
-        return 0;
-    }
+        return 1;
+      }
     case Action::Dump:
-    {
-        persistentSystemOptions = PersistentSystemOptions::ReadSystemSettings();
-        persistentSystemOptions.Dump(Tcout);
-        return 0;
-    }
+      {
+        if(action_dump()) {
+          return 0;
+        }
+        return 1;
+      }
     case Action::ForceUnblock:
-    {
-        bool succeded = PersistentSystemOptions::AllEnabled().WriteSystemSettings();
-        if(verbose)
-        {
-            if(succeded)
-                Tcout << _T("Reset persistent system options.") << std::endl;
-            else
-                Tcout << _T("Reseting persistent system options failed.") << std::endl;
+      {
+        if(action_force_unblock()) {
+          return 0;
         }
-        if(!succeded)
-            return 1;
-        return 0;
-    }
+        return 1;
+      }
     case Action::Save:
-    {
-        persistentSystemOptions = PersistentSystemOptions::ReadSystemSettings();
-        if(verbose)
-        {
-            Tcout << _T("Read persistent system options:") << std::endl;
-            persistentSystemOptions.Dump(Tcout);
+      {
+        if (action_save()) {
+          return 0;
         }
-        bool succeded = persistentSystemOptions.WriteToStorage();
-        if(verbose)
-        {
-            if(succeded)
-                Tcout << _T("Saved persistent system options.") << std::endl;
-            else
-                Tcout << _T("Saving persistent system options failed.") << std::endl;
-        }
-        if(!succeded)
-            return 1;
-        return 0;
-    }
+        return 1;
+      }
     case Action::Unblock:
-    {
-        persistentSystemOptions = PersistentSystemOptions::ReadFromStorage();
-        if(verbose)
-        {
-            Tcout << _T("Loaded persistent system options:") << std::endl;
-            persistentSystemOptions.Dump(Tcout);
+      {
+        if(action_unblock()) {
+          return 0;
+        } else {
+          return 1;
         }
-        bool succeded = persistentSystemOptions.WriteSystemSettings();
-        if(verbose)
-        {
-            if(succeded)
-                Tcout << _T("Restored persistent system options.") << std::endl;
-            else
-                Tcout << _T("Restoring persistent system options failed.") << std::endl;
-        }
-        if(!succeded)
-            return 1;
-        return 0;
-    }
+      }
     case Action::Version:
-    {
+      {
         Tcout << _T(VERSION_STRING) << std::endl;
         return 0;
-    }
-    }
+      }
+  }
 
-    if(password.empty())
-    {
-        debugPassword = true;
-        hashedPassword = hashPassword(_T("exit"));
-        if(verbose)
-        {
-            Tcout << _T("Using debug password: \"exit\"") << std::endl;
-        }
-    }
-    else if(!MD5::Hash::parse(password, hashedPassword))
-    {
-        hashedPassword = hashPassword(password);
-    }
-
+  if(password.empty())
+  {
+    debugPassword = true;
+    hashedPassword = hashPassword(_T("exit"));
     if(verbose)
     {
-        Tcout << _T("Hashed password: ") << hashedPassword << std::endl;
+      Tcout << _T("Using debug password: \"exit\"") << std::endl;
     }
+  }
+  else if(!MD5::Hash::parse(password, hashedPassword))
+  {
+    hashedPassword = hashPassword(password);
+  }
 
-    password = _T("");
+  if(verbose)
+  {
+    Tcout << _T("Hashed password: ") << hashedPassword << std::endl;
+  }
 
-    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    keyboardIcon = LoadIcon(instance, MAKEINTRESOURCE(IDI_KEYBOARD));
-    backgroundImage = (HBITMAP)LoadImage(instance, MAKEINTRESOURCE(IDB_BACKGROUND), IMAGE_BITMAP, 0, 0, LR_DEFAULTCOLOR);
-    backgroundImageError = (HBITMAP)LoadImage(instance, MAKEINTRESOURCE(IDB_BACKGROUND_ERROR), IMAGE_BITMAP, 0, 0, LR_DEFAULTCOLOR);
+  password = _T("");
 
-    WNDCLASSEX windowClass;
-    windowClass.hInstance = instance;
-    windowClass.lpszClassName = className;
-    windowClass.lpfnWndProc = StaticWindowProcedure;
-    windowClass.style = CS_HREDRAW | CS_VREDRAW;
-    windowClass.cbSize = sizeof(WNDCLASSEX);
-    windowClass.hIcon = LoadIcon(instance, MAKEINTRESOURCE(IDI_MAIN_ICON));
-    windowClass.hIconSm = windowClass.hIcon;
-    windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
-    windowClass.lpszMenuName = NULL;
-    windowClass.cbClsExtra = 0;
-    windowClass.cbWndExtra = 0;
-    windowClass.hbrBackground = (HBRUSH)COLOR_BACKGROUND;
+  CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+  keyboardIcon = LoadIcon(instance, MAKEINTRESOURCE(IDI_KEYBOARD));
+  backgroundImage = (HBITMAP)LoadImage(instance, MAKEINTRESOURCE(IDB_BACKGROUND), IMAGE_BITMAP, 0, 0, LR_DEFAULTCOLOR);
+  backgroundImageError = (HBITMAP)LoadImage(instance, MAKEINTRESOURCE(IDB_BACKGROUND_ERROR), IMAGE_BITMAP, 0, 0, LR_DEFAULTCOLOR);
 
-    if(!RegisterClassEx(&windowClass))
-    {
-        return 1;
-    }
+  WNDCLASSEX windowClass;
+  windowClass.hInstance = instance;
+  windowClass.lpszClassName = className;
+  windowClass.lpfnWndProc = StaticWindowProcedure;
+  windowClass.style = CS_HREDRAW | CS_VREDRAW;
+  windowClass.cbSize = sizeof(WNDCLASSEX);
+  windowClass.hIcon = LoadIcon(instance, MAKEINTRESOURCE(IDI_MAIN_ICON));
+  windowClass.hIconSm = windowClass.hIcon;
+  windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
+  windowClass.lpszMenuName = NULL;
+  windowClass.cbClsExtra = 0;
+  windowClass.cbWndExtra = 0;
+  windowClass.hbrBackground = (HBRUSH)COLOR_BACKGROUND;
 
-    persistentSystemOptions = PersistentSystemOptions::ReadSystemSettings();
-    if(verbose)
-    {
-        Tcout << _T("Read persistent system options:") << std::endl;
-        persistentSystemOptions.Dump(Tcout);
-    }
+  if(!RegisterClassEx(&windowClass))
+  {
+    return 1;
+  }
 
-    if(!debugPassword)
-    {
-        if(!PersistentSystemOptions::AllDisabled().WriteSystemSettings())
-        {
-            if(verbose)
-            {
-                Tcout << _T("Writing persistent system options failed.");
-            }
-        }
-    }
+  action_dump();
 
-    EnumDisplayMonitors(NULL, NULL, [this](HMONITOR monitor, HDC monitorDC, LPRECT pMonitorRect)->BOOL
-    {
-        MONITORINFOEX monitorInfo;
-        monitorInfo.cbSize = sizeof(monitorInfo);
-        GetMonitorInfo(monitor, &monitorInfo);
-        CreateData createData;
-        createData.initWindow = Window((monitorInfo.dwFlags & MONITORINFOF_PRIMARY) == MONITORINFOF_PRIMARY);
-        createData.application = this;
-        CreateWindowEx(
+  if(!debugPassword)
+  {
+    action_block();
+  }
+
+  EnumDisplayMonitors(NULL, NULL, [this](HMONITOR monitor, HDC monitorDC, LPRECT pMonitorRect)->BOOL
+      {
+      MONITORINFOEX monitorInfo;
+      monitorInfo.cbSize = sizeof(monitorInfo);
+      GetMonitorInfo(monitor, &monitorInfo);
+      CreateData createData;
+      createData.initWindow = Window((monitorInfo.dwFlags & MONITORINFOF_PRIMARY) == MONITORINFOF_PRIMARY);
+      createData.application = this;
+      CreateWindowEx(
 #ifdef DEBUG
-                0,
+          0,
 #else
-                WS_EX_TOPMOST,
+          WS_EX_TOPMOST,
 #endif
-                className,
-                _T("Lock Screen"),
-                WS_POPUP,
-                pMonitorRect->left,
-                pMonitorRect->top,
-                pMonitorRect->right - pMonitorRect->left,
-                pMonitorRect->bottom - pMonitorRect->top,
-                HWND_DESKTOP,
-                NULL,
-                instance,
-                (LPVOID)&createData);
-        if(verbose)
-        {
-            Tcout << _T("Created window for monitor: ") << monitorInfo.szDevice << _T(" (") << pMonitorRect->left << _T(", ") << pMonitorRect->top << _T(")-(") << pMonitorRect->right << _T(", ") << pMonitorRect->bottom << _T(")") << std::endl;
-        }
-        return TRUE;
-    });
+          className,
+          _T("Lock Screen"),
+          WS_POPUP,
+          pMonitorRect->left,
+          pMonitorRect->top,
+          pMonitorRect->right - pMonitorRect->left,
+          pMonitorRect->bottom - pMonitorRect->top,
+          HWND_DESKTOP,
+          NULL,
+          instance,
+          (LPVOID)&createData);
+      if(verbose)
+      {
+        Tcout << _T("Created window for monitor: ") << monitorInfo.szDevice << _T(" (") << pMonitorRect->left << _T(", ") << pMonitorRect->top << _T(")-(") << pMonitorRect->right << _T(", ") << pMonitorRect->bottom << _T(")") << std::endl;
+      }
+      return TRUE;
+      });
 
 
-    /* Make the window visible on the screen */
+  /* Make the window visible on the screen */
+  for(auto i : windows)
+  {
+    ShowWindow(std::get<1>(i).window, nCmdShow);
+  }
+
+  SetFocus(passwordControl);
+
+  keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, StaticKeyboardHookProcedure, NULL, 0);
+  if(verbose && keyboardHook != NULL)
+  {
+    Tcout << _T("Installed keyboard hook.") << std::endl;
+  }
+  else if(verbose)
+  {
+    Tcout << _T("Keyboard hook installation failed.") << std::endl;
+  }
+
+  /* Run the message loop. It will run until GetMessage() returns 0 */
+  MSG message;
+
+  for(BOOL retval = GetMessage(&message, NULL, 0, 0); retval != 0; retval = GetMessage(&message, NULL, 0, 0))
+  {
+    if(retval == -1)
+    {
+      return 1;
+    }
+
+    bool handled = false;
+
     for(auto i : windows)
     {
-        ShowWindow(std::get<1>(i).window, nCmdShow);
+      if(IsDialogMessage(std::get<1>(i).window, &message))
+      {
+        handled = true;
+        break;
+      }
     }
 
-    SetFocus(passwordControl);
-
-    keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, StaticKeyboardHookProcedure, NULL, 0);
-    if(verbose && keyboardHook != NULL)
+    if(handled)
     {
-        Tcout << _T("Installed keyboard hook.") << std::endl;
+      continue;
     }
-    else if(verbose)
+
+    /* Translate virtual-key messages into character messages */
+    TranslateMessage(&message);
+    /* Send message to WindowProcedure */
+    DispatchMessage(&message);
+  }
+
+  if(keyboardHook)
+  {
+    UnhookWindowsHookEx(keyboardHook);
+    if(verbose)
     {
-        Tcout << _T("Keyboard hook installation failed.") << std::endl;
+      Tcout << _T("Removed keyboard hook.") << std::endl;
     }
+  }
 
-    /* Run the message loop. It will run until GetMessage() returns 0 */
-    MSG message;
+  if(!debugPassword)
+  {
+    action_write_settings();
+  }
 
-    for(BOOL retval = GetMessage(&message, NULL, 0, 0); retval != 0; retval = GetMessage(&message, NULL, 0, 0))
-    {
-        if(retval == -1)
-        {
-            return 1;
-        }
-
-        bool handled = false;
-
-        for(auto i : windows)
-        {
-            if(IsDialogMessage(std::get<1>(i).window, &message))
-            {
-                handled = true;
-                break;
-            }
-        }
-
-        if(handled)
-        {
-            continue;
-        }
-
-        /* Translate virtual-key messages into character messages */
-        TranslateMessage(&message);
-        /* Send message to WindowProcedure */
-        DispatchMessage(&message);
-    }
-
-    if(keyboardHook)
-    {
-        UnhookWindowsHookEx(keyboardHook);
-        if(verbose)
-        {
-            Tcout << _T("Removed keyboard hook.") << std::endl;
-        }
-    }
-
-    if(!debugPassword)
-    {
-        if(!persistentSystemOptions.WriteSystemSettings())
-        {
-            if(verbose)
-            {
-                Tcout << _T("Writing persistent system options failed.");
-            }
-        }
-    }
-
-    /* The program return-value is the value that we gave PostQuitMessage() */
-    return message.wParam;
+  /* The program return-value is the value that we gave PostQuitMessage() */
+  return message.wParam;
 }
 
 LRESULT CALLBACK Application::StaticWindowProcedure(HWND hwnd, UINT messageId, WPARAM wParam, LPARAM lParam)
 {
-    Application *application = (Application *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+  Application *application = (Application *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 
-    if(application)
-    {
-        Window &window = application->windows.at(hwnd);
-        return application->WindowProcedure(window, messageId, wParam, lParam);
-    }
+  if(application)
+  {
+    Window &window = application->windows.at(hwnd);
+    return application->WindowProcedure(window, messageId, wParam, lParam);
+  }
 
-    if(messageId == WM_NCCREATE || messageId == WM_CREATE)
-    {
-        LPCREATESTRUCT createStruct = (LPCREATESTRUCT)lParam;
-        CreateData *createData = (CreateData *)createStruct->lpCreateParams;
-        application = createData->application;
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)application);
-        createData->initWindow.window = hwnd;
-        return application->WindowProcedure(std::get<1>(*std::get<0>(application->windows.emplace(hwnd, createData->initWindow))), messageId, wParam, lParam);
-    }
+  if(messageId == WM_NCCREATE || messageId == WM_CREATE)
+  {
+    LPCREATESTRUCT createStruct = (LPCREATESTRUCT)lParam;
+    CreateData *createData = (CreateData *)createStruct->lpCreateParams;
+    application = createData->application;
+    SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)application);
+    createData->initWindow.window = hwnd;
+    return application->WindowProcedure(std::get<1>(*std::get<0>(application->windows.emplace(hwnd, createData->initWindow))), messageId, wParam, lParam);
+  }
 
-    return DefWindowProc(hwnd, messageId, wParam, lParam);
+  return DefWindowProc(hwnd, messageId, wParam, lParam);
 }
 
 /* This function is called by the Windows function DispatchMessage() */
 LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wParam, LPARAM lParam)
 {
-    switch(messageId)  /* handle the messages */
-    {
+  switch(messageId)  /* handle the messages */
+  {
     case WM_CREATE:
+      {
+        if(window.isPrimary)
         {
-            if(window.isPrimary)
-            {
-                RECT windowRect;
-                GetClientRect(window.window, &windowRect);
-                POINT windowCenter;
-                windowCenter.x = (windowRect.right - windowRect.left) / 2;
-                windowCenter.y = (windowRect.bottom - windowRect.top) / 2;
-                backgroundImageControl = CreateWindowEx(0,
-                        _T("STATIC"),
-                        NULL,
-                        WS_CHILD | WS_VISIBLE | SS_BITMAP | SS_CENTERIMAGE,
-                        windowCenter.x - 162,
-                        windowCenter.y - 207,
-                        324,
-                        374,
-                        window.window,
-                        (HMENU)backgroundImageControlId,
-                        instance,
-                        NULL);
-                SendMessage(backgroundImageControl, STM_SETIMAGE, (WPARAM)IMAGE_BITMAP, (LPARAM)backgroundImage);
-                SIZE editSize = {290, 30};
-                RECT editRect;
-                editRect.left = windowCenter.x - editSize.cx / 2;
-                editRect.right = editRect.left + editSize.cx;
-                editRect.top = windowCenter.y - editSize.cy / 2;
-                editRect.bottom = editRect.top + editSize.cy;
-                passwordControl = CreateWindowEx(0,
-                        _T("EDIT"),
-                        _T(""),
-                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_PASSWORD,
-                        editRect.left,
-                        editRect.top,
-                        editRect.right - editRect.left,
-                        editRect.bottom - editRect.top,
-                        window.window,
-                        (HMENU)passwordControlId,
-                        instance,
-                        NULL);
-                LOGFONT passwordControlFontDescriptor;
-                GetObject(GetStockObject(DEFAULT_GUI_FONT), sizeof(passwordControlFontDescriptor), &passwordControlFontDescriptor);
-                passwordControlFontDescriptor.lfWidth = 0;
-                HDC passwordControlDC = GetDC(passwordControl);
-                passwordControlFontDescriptor.lfHeight = 30;
-                ReleaseDC(passwordControl, passwordControlDC);
-                HFONT passwordControlFont = CreateFontIndirect(&passwordControlFontDescriptor);
+          RECT windowRect;
+          GetClientRect(window.window, &windowRect);
+          POINT windowCenter;
+          windowCenter.x = (windowRect.right - windowRect.left) / 2;
+          windowCenter.y = (windowRect.bottom - windowRect.top) / 2;
+          backgroundImageControl = CreateWindowEx(0,
+              _T("STATIC"),
+              NULL,
+              WS_CHILD | WS_VISIBLE | SS_BITMAP | SS_CENTERIMAGE,
+              windowCenter.x - 162,
+              windowCenter.y - 207,
+              324,
+              374,
+              window.window,
+              (HMENU)backgroundImageControlId,
+              instance,
+              NULL);
+          SendMessage(backgroundImageControl, STM_SETIMAGE, (WPARAM)IMAGE_BITMAP, (LPARAM)backgroundImage);
+          SIZE editSize = {290, 30};
+          RECT editRect;
+          editRect.left = windowCenter.x - editSize.cx / 2;
+          editRect.right = editRect.left + editSize.cx;
+          editRect.top = windowCenter.y - editSize.cy / 2;
+          editRect.bottom = editRect.top + editSize.cy;
+          passwordControl = CreateWindowEx(0,
+              _T("EDIT"),
+              _T(""),
+              WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_PASSWORD,
+              editRect.left,
+              editRect.top,
+              editRect.right - editRect.left,
+              editRect.bottom - editRect.top,
+              window.window,
+              (HMENU)passwordControlId,
+              instance,
+              NULL);
+          LOGFONT passwordControlFontDescriptor;
+          GetObject(GetStockObject(DEFAULT_GUI_FONT), sizeof(passwordControlFontDescriptor), &passwordControlFontDescriptor);
+          passwordControlFontDescriptor.lfWidth = 0;
+          HDC passwordControlDC = GetDC(passwordControl);
+          passwordControlFontDescriptor.lfHeight = 30;
+          ReleaseDC(passwordControl, passwordControlDC);
+          HFONT passwordControlFont = CreateFontIndirect(&passwordControlFontDescriptor);
 
-                if(passwordControlFont != NULL)
-                {
-                    SendMessage(passwordControl, WM_SETFONT, (WPARAM)passwordControlFont, MAKELPARAM(FALSE, 0));
-                }
+          if(passwordControlFont != NULL)
+          {
+            SendMessage(passwordControl, WM_SETFONT, (WPARAM)passwordControlFont, MAKELPARAM(FALSE, 0));
+          }
 
-                SendMessage(passwordControl, WM_SETTEXT, (WPARAM)NULL, (LPARAM)_T(""));
-                SendMessage(passwordControl, EM_SETPASSWORDCHAR, (WPARAM)_T('●'), (LPARAM)NULL);
-                RECT unlockRect = editRect;
-                unlockRect.left = editRect.right + 5;
-                unlockRect.right = unlockRect.left + 50;
-                unlockControl = CreateWindowEx(0,
-                        _T("BUTTON"),
-                        _T("Unlock"),
-                        WS_CHILD | WS_TABSTOP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | BS_DEFPUSHBUTTON | BS_PUSHBUTTON | BS_OWNERDRAW,
-                        unlockRect.left,
-                        unlockRect.top,
-                        unlockRect.right - unlockRect.left,
-                        unlockRect.bottom - unlockRect.top,
-                        window.window,
-                        (HMENU)unlockControlId,
-                        instance,
-                        NULL);
-                RECT startKeyboardRect;
-                startKeyboardRect.right = windowRect.right - 5;
-                startKeyboardRect.bottom = windowRect.bottom - 5;
-                startKeyboardRect.top = startKeyboardRect.bottom - 64;
-                startKeyboardRect.left = startKeyboardRect.right - 64;
-                startKeyboardControl = CreateWindowEx(0,
-                        _T("BUTTON"),
-                        _T("On-Screen Keyboard"),
-                        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | BS_OWNERDRAW,
-                        startKeyboardRect.left,
-                        startKeyboardRect.top,
-                        startKeyboardRect.right - startKeyboardRect.left,
-                        startKeyboardRect.bottom - startKeyboardRect.top,
-                        window.window,
-                        (HMENU)startKeyboardControlId,
-                        instance,
-                        NULL);
-            }
-
-            EnableWindowSystemTouchGestures(window.window, false);
-
-            break;
+          SendMessage(passwordControl, WM_SETTEXT, (WPARAM)NULL, (LPARAM)_T(""));
+          SendMessage(passwordControl, EM_SETPASSWORDCHAR, (WPARAM)_T('●'), (LPARAM)NULL);
+          RECT unlockRect = editRect;
+          unlockRect.left = editRect.right + 5;
+          unlockRect.right = unlockRect.left + 50;
+          unlockControl = CreateWindowEx(0,
+              _T("BUTTON"),
+              _T("Unlock"),
+              WS_CHILD | WS_TABSTOP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | BS_DEFPUSHBUTTON | BS_PUSHBUTTON | BS_OWNERDRAW,
+              unlockRect.left,
+              unlockRect.top,
+              unlockRect.right - unlockRect.left,
+              unlockRect.bottom - unlockRect.top,
+              window.window,
+              (HMENU)unlockControlId,
+              instance,
+              NULL);
+          RECT startKeyboardRect;
+          startKeyboardRect.right = windowRect.right - 5;
+          startKeyboardRect.bottom = windowRect.bottom - 5;
+          startKeyboardRect.top = startKeyboardRect.bottom - 64;
+          startKeyboardRect.left = startKeyboardRect.right - 64;
+          startKeyboardControl = CreateWindowEx(0,
+              _T("BUTTON"),
+              _T("On-Screen Keyboard"),
+              WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | BS_OWNERDRAW,
+              startKeyboardRect.left,
+              startKeyboardRect.top,
+              startKeyboardRect.right - startKeyboardRect.left,
+              startKeyboardRect.bottom - startKeyboardRect.top,
+              window.window,
+              (HMENU)startKeyboardControlId,
+              instance,
+              NULL);
         }
+
+        EnableWindowSystemTouchGestures(window.window, false);
+
+        break;
+      }
 
     case WM_DESTROY:
-        PostQuitMessage(66);  /* send a WM_QUIT to the message queue */
-        EnableTouchKeyboard(window, false);
-        break;
+      PostQuitMessage(66);  /* send a WM_QUIT to the message queue */
+      EnableTouchKeyboard(window, false);
+      break;
 
     case WM_ERASEBKGND:
-        return 0;
+      return 0;
 
     case WM_COMMAND:
+      {
+        switch(LOWORD(wParam))
         {
-            switch(LOWORD(wParam))
+          case unlockControlId:
             {
-            case unlockControlId:
-                {
-                    switch(HIWORD(wParam))
+              switch(HIWORD(wParam))
+              {
+                case BN_CLICKED:
+                  {
+                    tstring password;
+                    password.resize((std::size_t)GetWindowTextLength(passwordControl) + 1);
+                    GetWindowText(passwordControl, (LPTSTR)password.data(), (int)password.size());
+                    SetWindowText(passwordControl, _T(""));
+                    std::size_t nullPosition = password.find_first_of(_T('\0'));
+
+                    if(nullPosition != tstring::npos)
                     {
-                    case BN_CLICKED:
-                        {
-                            tstring password;
-                            password.resize((std::size_t)GetWindowTextLength(passwordControl) + 1);
-                            GetWindowText(passwordControl, (LPTSTR)password.data(), (int)password.size());
-                            SetWindowText(passwordControl, _T(""));
-                            std::size_t nullPosition = password.find_first_of(_T('\0'));
-
-                            if(nullPosition != tstring::npos)
-                            {
-                                password.resize(nullPosition);
-                            }
-
-                            if(hashPassword(password) == hashedPassword)
-                            {
-                                for(auto i : windows)
-                                {
-                                    DestroyWindow(std::get<1>(i).window);
-                                }
-
-                                return 0;
-                            }
-
-                            SendMessage(backgroundImageControl, STM_SETIMAGE, (WPARAM)IMAGE_BITMAP, (LPARAM)backgroundImageError);
-
-                            tostringstream str;
-
-                            if(debugPassword)
-                            {
-                                str << _T("Password = \"") << password << _T("\". Type \"exit\" to unlock.");
-                                MessageBox(window.window, str.str().c_str(), _T(""), MB_OK);
-                            }
-
-                            SetFocus(passwordControl);
-                            break;
-                        }
+                      password.resize(nullPosition);
                     }
 
-                    break;
-                }
-
-            case startKeyboardControlId:
-                {
-                    switch(HIWORD(wParam))
+                    if(hashPassword(password) == hashedPassword)
                     {
-                    case BN_CLICKED:
-                        {
-                            EnableTouchKeyboard(window, true);
-                            SetFocus(passwordControl);
-                            break;
-                        }
+                      for(auto i : windows)
+                      {
+                        DestroyWindow(std::get<1>(i).window);
+                      }
+
+                      return 0;
                     }
 
+                    SendMessage(backgroundImageControl, STM_SETIMAGE, (WPARAM)IMAGE_BITMAP, (LPARAM)backgroundImageError);
+
+                    tostringstream str;
+
+                    if(debugPassword)
+                    {
+                      str << _T("Password = \"") << password << _T("\". Type \"exit\" to unlock.");
+                      MessageBox(window.window, str.str().c_str(), _T(""), MB_OK);
+                    }
+
+                    SetFocus(passwordControl);
                     break;
-                }
+                  }
+              }
+
+              break;
             }
 
-            break;
+          case startKeyboardControlId:
+            {
+              switch(HIWORD(wParam))
+              {
+                case BN_CLICKED:
+                  {
+                    EnableTouchKeyboard(window, true);
+                    SetFocus(passwordControl);
+                    break;
+                  }
+              }
+
+              break;
+            }
         }
+
+        break;
+      }
 
     case WM_DRAWITEM:
+      {
+        LPDRAWITEMSTRUCT drawItemStruct = (LPDRAWITEMSTRUCT)lParam;
+        HDC dc = drawItemStruct->hDC;
+
+        switch((UINT)wParam)
         {
-            LPDRAWITEMSTRUCT drawItemStruct = (LPDRAWITEMSTRUCT)lParam;
-            HDC dc = drawItemStruct->hDC;
-
-            switch((UINT)wParam)
+          case startKeyboardControlId:
             {
-            case startKeyboardControlId:
-                {
-                    HBRUSH brush = CreateSolidBrush(RGB(0, 0, 0));
-                    DrawIconEx(dc,
-                            drawItemStruct->rcItem.left,
-                            drawItemStruct->rcItem.top,
-                            keyboardIcon,
-                            drawItemStruct->rcItem.right - drawItemStruct->rcItem.left,
-                            drawItemStruct->rcItem.bottom - drawItemStruct->rcItem.top,
-                            0,
-                            brush,
-                            DI_NORMAL);
-                    DeleteObject(brush);
-                    return 0;
-                }
+              HBRUSH brush = CreateSolidBrush(RGB(0, 0, 0));
+              DrawIconEx(dc,
+                  drawItemStruct->rcItem.left,
+                  drawItemStruct->rcItem.top,
+                  keyboardIcon,
+                  drawItemStruct->rcItem.right - drawItemStruct->rcItem.left,
+                  drawItemStruct->rcItem.bottom - drawItemStruct->rcItem.top,
+                  0,
+                  brush,
+                  DI_NORMAL);
+              DeleteObject(brush);
+              return 0;
             }
-
-            break;
         }
+
+        break;
+      }
 
     case WM_PAINT:
-        {
-            PAINTSTRUCT ps;
-            HDC dc = BeginPaint(window.window, &ps);
-            HBRUSH backgroundBrush = CreateSolidBrush(RGB(0, 0, 0));
-            //HBRUSH oldBrush = SelectObject(dc, backgroundBrush);
-            FillRect(dc, &ps.rcPaint, backgroundBrush);
-            //SelectObject(dc, oldBrush);
-            DeleteObject(backgroundBrush);
-            EndPaint(window.window, &ps);
-            break;
-        }
+      {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(window.window, &ps);
+        HBRUSH backgroundBrush = CreateSolidBrush(RGB(0, 0, 0));
+        //HBRUSH oldBrush = SelectObject(dc, backgroundBrush);
+        FillRect(dc, &ps.rcPaint, backgroundBrush);
+        //SelectObject(dc, oldBrush);
+        DeleteObject(backgroundBrush);
+        EndPaint(window.window, &ps);
+        break;
+      }
 
     case DM_GETDEFID:
-        {
-            return MAKELRESULT(unlockControlId, DC_HASDEFID);
-        }
+      {
+        return MAKELRESULT(unlockControlId, DC_HASDEFID);
+      }
 
     case WM_ACTIVATE:
+      {
+        switch(wParam)
         {
-            switch(wParam)
-            {
-            case WA_INACTIVE:
-                SetWindowPos(window.window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-                break;
-            }
-
+          case WA_INACTIVE:
+            SetWindowPos(window.window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
             break;
         }
 
-    default: /* for messages that we don't deal with */
-        return DefWindowProc(window.window, messageId, wParam, lParam);
-    }
+        break;
+      }
 
-    return 0;
+    default: /* for messages that we don't deal with */
+      return DefWindowProc(window.window, messageId, wParam, lParam);
+  }
+
+  return 0;
 }
 
 LRESULT CALLBACK Application::StaticKeyboardHookProcedure(int nCode, WPARAM wParam, LPARAM lParam)
 {
-    if(nCode < 0)
-    {
-        return CallNextHookEx((HHOOK)NULL, nCode, wParam, lParam);
-    }
-	
-	static std::unordered_set<DWORD> *pCurrentlyPushedKeys = nullptr;
-	
-	if(!pCurrentlyPushedKeys)
-		pCurrentlyPushedKeys = new std::unordered_set<DWORD>();
+  if(nCode < 0)
+  {
+    return CallNextHookEx((HHOOK)NULL, nCode, wParam, lParam);
+  }
 
-    LPKBDLLHOOKSTRUCT hookStruct = (LPKBDLLHOOKSTRUCT)lParam;
-	
-	bool blockKey = false;
-	
-    if(hookStruct->flags & LLKHF_ALTDOWN)
-    {
-        blockKey = true;
-    }
+  static std::unordered_set<DWORD> *pCurrentlyPushedKeys = nullptr;
 
-    switch(hookStruct->vkCode)
-    {
+  if(!pCurrentlyPushedKeys)
+    pCurrentlyPushedKeys = new std::unordered_set<DWORD>();
+
+  LPKBDLLHOOKSTRUCT hookStruct = (LPKBDLLHOOKSTRUCT)lParam;
+
+  bool blockKey = false;
+
+  if(hookStruct->flags & LLKHF_ALTDOWN)
+  {
+    blockKey = true;
+  }
+
+  switch(hookStruct->vkCode)
+  {
     case VK_ESCAPE:
     case VK_LMENU:
     case VK_RMENU:
@@ -1240,552 +1087,256 @@ LRESULT CALLBACK Application::StaticKeyboardHookProcedure(int nCode, WPARAM wPar
     case VK_LAUNCH_MEDIA_SELECT:
     case VK_LAUNCH_APP1:
     case VK_LAUNCH_APP2:
-        blockKey = true;
-		break;
-    }
-	
-	if(hookStruct->flags & LLKHF_UP)
-	{
-		if(pCurrentlyPushedKeys->count(hookStruct->vkCode))
-			blockKey = false;
-		pCurrentlyPushedKeys->erase(hookStruct->vkCode);
-	}
-	else
-	{
-		if(!blockKey)
-			pCurrentlyPushedKeys->insert(hookStruct->vkCode);
-	}
-	
-	if(blockKey)
-	{
-		return 1;
-	}
+      blockKey = true;
+      break;
+  }
 
-    return CallNextHookEx((HHOOK)NULL, nCode, wParam, lParam);
+  if(hookStruct->flags & LLKHF_UP)
+  {
+    if(pCurrentlyPushedKeys->count(hookStruct->vkCode))
+      blockKey = false;
+    pCurrentlyPushedKeys->erase(hookStruct->vkCode);
+  }
+  else
+  {
+    if(!blockKey)
+      pCurrentlyPushedKeys->insert(hookStruct->vkCode);
+  }
+
+  if(blockKey)
+  {
+    return 1;
+  }
+
+  return CallNextHookEx((HHOOK)NULL, nCode, wParam, lParam);
 }
 
 HRESULT Application::EnableWindowSystemTouchGestures(HWND window, bool enabled)
 {
-    PROPERTYKEY key;
-    HRESULT retval = PSPropertyKeyFromString(L"{32CE38B2-2C9A-41B1-9BC5-B3784394AA44} 2", &key);
+  PROPERTYKEY key;
+  HRESULT retval = PSPropertyKeyFromString(L"{32CE38B2-2C9A-41B1-9BC5-B3784394AA44} 2", &key);
 
-    if(retval != S_OK)
-    {
-        return retval;
-    }
-
-    IPropertyStore *propertyStore;
-    retval = SHGetPropertyStoreForWindow(window, IID_PPV_ARGS(&propertyStore));
-
-    if(!SUCCEEDED(retval))
-    {
-        return retval;
-    }
-
-    PROPVARIANT variable;
-    variable.vt = VT_BOOL;
-    variable.boolVal = enabled ? VARIANT_FALSE : VARIANT_TRUE;
-    retval = propertyStore->SetValue(key, variable);
-    propertyStore->Release();
+  if(retval != S_OK)
+  {
     return retval;
+  }
+
+  IPropertyStore *propertyStore;
+  retval = SHGetPropertyStoreForWindow(window, IID_PPV_ARGS(&propertyStore));
+
+  if(!SUCCEEDED(retval))
+  {
+    return retval;
+  }
+
+  PROPVARIANT variable;
+  variable.vt = VT_BOOL;
+  variable.boolVal = enabled ? VARIANT_FALSE : VARIANT_TRUE;
+  retval = propertyStore->SetValue(key, variable);
+  propertyStore->Release();
+  return retval;
 }
 
 void Application::EnableTouchKeyboard(Window &parentWindow, bool enabled)
 {
-    if(!enabled)
+  if(!enabled)
+  {
+    HWND touchKeyboardWindow = NULL;
+    tstring className;
+    auto checkWindowFn = [&](HWND window)->BOOL
     {
-        HWND touchKeyboardWindow = NULL;
-        tstring className;
-        auto checkWindowFn = [&](HWND window)->BOOL
+      className.reserve(128);
+      className.resize(64);
+      int classNameSize;
+
+      do
+      {
+        classNameSize = GetClassName(window, &className[0], className.size());
+
+        if(classNameSize == 0)
         {
-            className.reserve(128);
-            className.resize(64);
-            int classNameSize;
-
-            do
-            {
-                classNameSize = GetClassName(window, &className[0], className.size());
-
-                if(classNameSize == 0)
-                {
-                    break;
-                }
-
-                className.resize(className.size() * 2);
-            }
-            while((std::size_t)classNameSize + 1 >= className.size());
-
-            if(classNameSize == 0)
-            {
-                return TRUE;
-            }
-
-            className.resize(classNameSize);
-
-            if(className == _T("IPTip_Main_Window"))
-            {
-                DWORD pid;
-                GetWindowThreadProcessId(window, &pid);
-                HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-
-                if(process == NULL)
-                {
-                    return TRUE;
-                }
-
-                tstring processImageFileName;
-                processImageFileName.reserve(128);
-                processImageFileName.resize(64);
-                DWORD processImageFileNameSize = processImageFileName.size();
-
-                do
-                {
-                    if(!QueryFullProcessImageName(process, 0, &processImageFileName[0], &processImageFileNameSize))
-                    {
-                        CloseHandle(process);
-                        process = NULL;
-                        break;
-                    }
-
-                    processImageFileName.resize(processImageFileName.size() * 2);
-                }
-                while(processImageFileNameSize + 1 >= processImageFileName.size());
-
-                if(process == NULL)
-                {
-                    return TRUE;
-                }
-
-                CloseHandle(process);
-
-                processImageFileName.resize(processImageFileNameSize);
-                std::size_t lastSlash = processImageFileName.find_last_of(_T("\\/"));
-
-                if(lastSlash != tstring::npos)
-                {
-                    processImageFileName.erase(0, lastSlash + 1);
-                }
-
-                for(TCHAR &ch : processImageFileName)
-                {
-                    ch = _totlower(ch);
-                }
-
-                if(processImageFileName != _T("tabtip.exe") && processImageFileName != _T("tabtip32.exe"))
-                {
-                    return TRUE;
-                }
-
-                touchKeyboardWindow = window;
-                return FALSE;
-            }
-
-            return TRUE;
-        };
-        HWND foundWindow = FindWindow(_T("IPTip_Main_Window"), NULL);
-
-        if(foundWindow != NULL)
-        {
-            if(checkWindowFn(foundWindow))
-            {
-                EnumWindows(checkWindowFn);
-            }
-        }
-        else
-        {
-            EnumWindows(checkWindowFn);
+          break;
         }
 
-        if(touchKeyboardWindow != NULL)
+        className.resize(className.size() * 2);
+      }
+      while((std::size_t)classNameSize + 1 >= className.size());
+
+      if(classNameSize == 0)
+      {
+        return TRUE;
+      }
+
+      className.resize(classNameSize);
+
+      if(className == _T("IPTip_Main_Window"))
+      {
+        DWORD pid;
+        GetWindowThreadProcessId(window, &pid);
+        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+
+        if(process == NULL)
         {
-            PostMessage(touchKeyboardWindow, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, (LPARAM)MAKELPARAM(0, -1));
+          return TRUE;
         }
 
-        return;
-    }
+        tstring processImageFileName;
+        processImageFileName.reserve(128);
+        processImageFileName.resize(64);
+        DWORD processImageFileNameSize = processImageFileName.size();
 
-    STARTUPINFO startupInfo;
-    ZeroMemory(&startupInfo, sizeof(startupInfo)); // finish
-    PROCESS_INFORMATION processInformation;
-    ZeroMemory(&processInformation, sizeof(processInformation)); // finish
-    startupInfo.cb = sizeof(startupInfo);
-    tstring programFiles;
-    programFiles.resize(1);
-    LPCTSTR programFilesEnvironmentVariableName = _T("PROGRAMFILES");
+        do
+        {
+          if(!QueryFullProcessImageName(process, 0, &processImageFileName[0], &processImageFileNameSize))
+          {
+            CloseHandle(process);
+            process = NULL;
+            break;
+          }
 
-    if(IsWow64Process())
+          processImageFileName.resize(processImageFileName.size() * 2);
+        }
+        while(processImageFileNameSize + 1 >= processImageFileName.size());
+
+        if(process == NULL)
+        {
+          return TRUE;
+        }
+
+        CloseHandle(process);
+
+        processImageFileName.resize(processImageFileNameSize);
+        std::size_t lastSlash = processImageFileName.find_last_of(_T("\\/"));
+
+        if(lastSlash != tstring::npos)
+        {
+          processImageFileName.erase(0, lastSlash + 1);
+        }
+
+        for(TCHAR &ch : processImageFileName)
+        {
+          ch = _totlower(ch);
+        }
+
+        if(processImageFileName != _T("tabtip.exe") && processImageFileName != _T("tabtip32.exe"))
+        {
+          return TRUE;
+        }
+
+        touchKeyboardWindow = window;
+        return FALSE;
+      }
+
+      return TRUE;
+    };
+    HWND foundWindow = FindWindow(_T("IPTip_Main_Window"), NULL);
+
+    if(foundWindow != NULL)
     {
-        programFilesEnvironmentVariableName = _T("ProgramW6432");
-    }
-
-    programFiles.resize(GetEnvironmentVariable(programFilesEnvironmentVariableName, &programFiles[0], programFiles.size()) + 1);
-    GetEnvironmentVariable(programFilesEnvironmentVariableName, &programFiles[0], programFiles.size());
-    std::size_t nullPosition = programFiles.find_first_of(_T('\0'));
-
-    if(nullPosition != tstring::npos)
-    {
-        programFiles.resize(nullPosition);
-    }
-
-    tstring command = programFiles + _T("\\Common Files\\microsoft shared\\ink\\TabTip.exe");
-    TCHAR *commandBuffer = new TCHAR[command.size() + 3];
-    commandBuffer[0] = _T('\"');
-
-    for(std::size_t i = 0; i < command.size(); i++)
-    {
-        commandBuffer[i + 1] = command[i];
-    }
-
-    commandBuffer[command.size() + 1] = _T('\"');
-    commandBuffer[command.size() + 2] = _T('\0');
-
-    DWORD error = ERROR_SUCCESS;
-    tstring functionName = _T("CreateProcess");
-
-    if(CreateProcess(NULL,
-            commandBuffer,
-            NULL,
-            NULL,
-            FALSE,
-            0,
-            NULL,
-            NULL,
-            &startupInfo,
-            &processInformation))
-    {
-        CloseHandle(processInformation.hProcess);
-        CloseHandle(processInformation.hThread);
+      if(checkWindowFn(foundWindow))
+      {
+        EnumWindows(checkWindowFn);
+      }
     }
     else
     {
-        error = GetLastError();
-
-        if(error == ERROR_ELEVATION_REQUIRED)
-        {
-            error = ERROR_SUCCESS;
-            functionName = _T("ShellExecute");
-
-            if(reinterpret_cast<std::intptr_t>(ShellExecute(parentWindow.window, _T("open"), command.c_str(), _T(""), NULL, SW_SHOWDEFAULT)) <= 32)
-            {
-                error = GetLastError();
-            }
-        }
+      EnumWindows(checkWindowFn);
     }
 
-    delete []commandBuffer;
+    if(touchKeyboardWindow != NULL)
+    {
+      PostMessage(touchKeyboardWindow, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, (LPARAM)MAKELPARAM(0, -1));
+    }
+
+    return;
+  }
+
+  STARTUPINFO startupInfo;
+  ZeroMemory(&startupInfo, sizeof(startupInfo)); // finish
+  PROCESS_INFORMATION processInformation;
+  ZeroMemory(&processInformation, sizeof(processInformation)); // finish
+  startupInfo.cb = sizeof(startupInfo);
+  tstring programFiles;
+  programFiles.resize(1);
+  LPCTSTR programFilesEnvironmentVariableName = _T("PROGRAMFILES");
+
+  if(IsWow64Process())
+  {
+    programFilesEnvironmentVariableName = _T("ProgramW6432");
+  }
+
+  programFiles.resize(GetEnvironmentVariable(programFilesEnvironmentVariableName, &programFiles[0], programFiles.size()) + 1);
+  GetEnvironmentVariable(programFilesEnvironmentVariableName, &programFiles[0], programFiles.size());
+  std::size_t nullPosition = programFiles.find_first_of(_T('\0'));
+
+  if(nullPosition != tstring::npos)
+  {
+    programFiles.resize(nullPosition);
+  }
+
+  tstring command = programFiles + _T("\\Common Files\\microsoft shared\\ink\\TabTip.exe");
+  TCHAR *commandBuffer = new TCHAR[command.size() + 3];
+  commandBuffer[0] = _T('\"');
+
+  for(std::size_t i = 0; i < command.size(); i++)
+  {
+    commandBuffer[i + 1] = command[i];
+  }
+
+  commandBuffer[command.size() + 1] = _T('\"');
+  commandBuffer[command.size() + 2] = _T('\0');
+
+  DWORD error = ERROR_SUCCESS;
+  tstring functionName = _T("CreateProcess");
+
+  if(CreateProcess(NULL,
+        commandBuffer,
+        NULL,
+        NULL,
+        FALSE,
+        0,
+        NULL,
+        NULL,
+        &startupInfo,
+        &processInformation))
+  {
+    CloseHandle(processInformation.hProcess);
+    CloseHandle(processInformation.hThread);
+  }
+  else
+  {
+    error = GetLastError();
+
+    if(error == ERROR_ELEVATION_REQUIRED)
+    {
+      error = ERROR_SUCCESS;
+      functionName = _T("ShellExecute");
+
+      if(reinterpret_cast<std::intptr_t>(ShellExecute(parentWindow.window, _T("open"), command.c_str(), _T(""), NULL, SW_SHOWDEFAULT)) <= 32)
+      {
+        error = GetLastError();
+      }
+    }
+  }
+
+  delete []commandBuffer;
 }
 
 bool Application::IsWow64Process()
 {
-    BOOL retval;
-    LPFN_ISWOW64PROCESS fn = (LPFN_ISWOW64PROCESS)GetProcAddress(GetModuleHandle(_T("kernel32")), "IsWow64Process");
+  BOOL retval;
+  LPFN_ISWOW64PROCESS fn = (LPFN_ISWOW64PROCESS)GetProcAddress(GetModuleHandle(_T("kernel32")), "IsWow64Process");
 
-    if(!fn)
-    {
-        return false;
-    }
-
-    if(!fn(GetCurrentProcess(), &retval))
-    {
-        return false;
-    }
-
-    return retval ? true : false;
-}
-
-PersistentSystemOptions PersistentSystemOptions::ReadSystemSettings()
-{
-    PersistentSystemOptions retval;
-    retval.hasChangePassword = !ReadRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("DisableChangePassword"), false);
-    retval.hasLockComputer = !ReadRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("DisableLockWorkstation"), false);
-    retval.hasLogOff = !ReadRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer"), _T("NoLogoff"), false);
-    retval.hasSwitchUser = !ReadRegistryKey(HKEY_LOCAL_MACHINE, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("HideFastUserSwitching"), false);
-    retval.hasTaskManager = !ReadRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("DisableTaskMgr"), false);
-    retval.hasPower = !ReadRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer"), _T("NoClose"), false);
-    retval.hasFilterKeysHotkey = ReadFilterKeysHotkey();
-    retval.hasMouseKeysHotkey = ReadMouseKeysHotkey();
-    retval.hasStickyKeysHotkey = ReadStickyKeysHotkey();
-    retval.hasToggleKeysHotkey = ReadToggleKeysHotkey();
-    retval.hasHighContrastHotkey = ReadHighContrastHotkey();
-    return retval;
-}
-
-bool PersistentSystemOptions::WriteSystemSettings() const
-{
-    bool allWorked = true;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("DisableChangePassword"), !hasChangePassword))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("DisableLockWorkstation"), !hasLockComputer))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer"), _T("NoLogoff"), !hasLogOff))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_LOCAL_MACHINE, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("HideFastUserSwitching"), !hasSwitchUser))
-        allWorked = false;
-
-#ifndef DEBUG
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("DisableTaskMgr"), !hasTaskManager))
-        allWorked = false;
-
-#endif // DEBUG
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer"), _T("NoClose"), !hasPower))
-        allWorked = false;
-
-    if(!WriteFilterKeysHotkey(hasFilterKeysHotkey))
-        allWorked = false;
-
-    if(!WriteMouseKeysHotkey(hasMouseKeysHotkey))
-        allWorked = false;
-
-    if(!WriteStickyKeysHotkey(hasStickyKeysHotkey))
-        allWorked = false;
-
-    if(!WriteToggleKeysHotkey(hasToggleKeysHotkey))
-        allWorked = false;
-
-    if(!WriteHighContrastHotkey(hasHighContrastHotkey))
-        allWorked = false;
-
-    return allWorked;
-}
-
-bool PersistentSystemOptions::ReadRegistryKey(HKEY baseHive, tstring path, tstring name, bool defaultValue)
-{
-    HKEY key;
-
-    if(ERROR_SUCCESS != RegOpenKeyEx(baseHive, path.c_str(), 0, KEY_QUERY_VALUE | KEY_WOW64_64KEY | STANDARD_RIGHTS_READ, &key))
-    {
-        return defaultValue;
-    }
-
-    DWORD type;
-    DWORD value;
-    DWORD valueSize = sizeof(value);
-
-    if(ERROR_SUCCESS != RegQueryValueEx(key, name.c_str(), NULL, &type, (LPBYTE)&value, (LPDWORD)&valueSize))
-    {
-        RegCloseKey(key);
-        return defaultValue;
-    }
-
-    RegCloseKey(key);
-
-    if(type != REG_DWORD)
-    {
-        return defaultValue;
-    }
-
-    return value != 0;
-}
-
-bool PersistentSystemOptions::WriteRegistryKey(HKEY baseHive, tstring path, tstring name, bool value)
-{
-    HKEY key;
-
-    if(ERROR_SUCCESS != RegCreateKeyEx(baseHive, path.c_str(), 0, NULL, REG_OPTION_VOLATILE, KEY_SET_VALUE | KEY_WOW64_64KEY | STANDARD_RIGHTS_WRITE | WRITE_OWNER, NULL, &key, NULL))
-    {
-        return false;
-    }
-
-    DWORD finalValue = value ? 1 : 0;
-
-    if(ERROR_SUCCESS != RegSetValueEx(key, name.c_str(), 0, REG_DWORD, (LPCBYTE)&finalValue, sizeof(finalValue)))
-    {
-        RegCloseKey(key);
-        return false;
-    }
-
-    RegCloseKey(key);
-    return true;
-}
-
-bool PersistentSystemOptions::ReadFilterKeysHotkey()
-{
-    FILTERKEYS settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETFILTERKEYS, sizeof(settings), (PVOID)&settings, 0))
-        return true;
-    if(settings.dwFlags & FKF_HOTKEYACTIVE)
-        return true;
+  if(!fn)
+  {
     return false;
-}
+  }
 
-bool PersistentSystemOptions::WriteFilterKeysHotkey(bool value)
-{
-    FILTERKEYS settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETFILTERKEYS, sizeof(settings), (PVOID)&settings, 0))
-        return false;
-    const DWORD flag = FKF_HOTKEYACTIVE;
-    settings.dwFlags &= ~flag;
-    if(value)
-        settings.dwFlags |= flag;
-    if(!SystemParametersInfo(SPI_SETFILTERKEYS, sizeof(settings), (PVOID)&settings, SPIF_SENDCHANGE))
-        return false;
-    return true;
-}
-
-bool PersistentSystemOptions::ReadMouseKeysHotkey()
-{
-    MOUSEKEYS settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETMOUSEKEYS, sizeof(settings), (PVOID)&settings, 0))
-        return true;
-    if(settings.dwFlags & MKF_HOTKEYACTIVE)
-        return true;
+  if(!fn(GetCurrentProcess(), &retval))
+  {
     return false;
+  }
+
+  return retval ? true : false;
 }
 
-bool PersistentSystemOptions::WriteMouseKeysHotkey(bool value)
-{
-    MOUSEKEYS settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETMOUSEKEYS, sizeof(settings), (PVOID)&settings, 0))
-        return false;
-    const DWORD flag = MKF_HOTKEYACTIVE;
-    settings.dwFlags &= ~flag;
-    if(value)
-        settings.dwFlags |= flag;
-    if(!SystemParametersInfo(SPI_SETMOUSEKEYS, sizeof(settings), (PVOID)&settings, SPIF_SENDCHANGE))
-        return false;
-    return true;
-}
-
-bool PersistentSystemOptions::ReadStickyKeysHotkey()
-{
-    STICKYKEYS settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETSTICKYKEYS, sizeof(settings), (PVOID)&settings, 0))
-        return true;
-    if(settings.dwFlags & SKF_HOTKEYACTIVE)
-        return true;
-    return false;
-}
-
-bool PersistentSystemOptions::WriteStickyKeysHotkey(bool value)
-{
-    STICKYKEYS settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETSTICKYKEYS, sizeof(settings), (PVOID)&settings, 0))
-        return false;
-    const DWORD flag = SKF_HOTKEYACTIVE;
-    settings.dwFlags &= ~flag;
-    if(value)
-        settings.dwFlags |= flag;
-    if(!SystemParametersInfo(SPI_SETSTICKYKEYS, sizeof(settings), (PVOID)&settings, SPIF_SENDCHANGE))
-        return false;
-    return true;
-}
-
-bool PersistentSystemOptions::ReadToggleKeysHotkey()
-{
-    TOGGLEKEYS settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETTOGGLEKEYS, sizeof(settings), (PVOID)&settings, 0))
-        return true;
-    if(settings.dwFlags & TKF_HOTKEYACTIVE)
-        return true;
-    return false;
-}
-
-bool PersistentSystemOptions::WriteToggleKeysHotkey(bool value)
-{
-    TOGGLEKEYS settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETTOGGLEKEYS, sizeof(settings), (PVOID)&settings, 0))
-        return false;
-    const DWORD flag = TKF_HOTKEYACTIVE;
-    settings.dwFlags &= ~flag;
-    if(value)
-        settings.dwFlags |= flag;
-    if(!SystemParametersInfo(SPI_SETTOGGLEKEYS, sizeof(settings), (PVOID)&settings, SPIF_SENDCHANGE))
-        return false;
-    return true;
-}
-
-bool PersistentSystemOptions::ReadHighContrastHotkey()
-{
-    HIGHCONTRAST settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETHIGHCONTRAST, sizeof(settings), (PVOID)&settings, 0))
-        return true;
-    if(settings.dwFlags & HCF_HOTKEYACTIVE)
-        return true;
-    return false;
-}
-
-bool PersistentSystemOptions::WriteHighContrastHotkey(bool value)
-{
-    HIGHCONTRAST settings;
-    settings.cbSize = sizeof(settings);
-    if(!SystemParametersInfo(SPI_GETHIGHCONTRAST, sizeof(settings), (PVOID)&settings, 0))
-        return false;
-    const DWORD flag = HCF_HOTKEYACTIVE;
-    settings.dwFlags &= ~flag;
-    if(value)
-        settings.dwFlags |= flag;
-    if(!SystemParametersInfo(SPI_SETHIGHCONTRAST, sizeof(settings), (PVOID)&settings, SPIF_SENDCHANGE))
-        return false;
-    return true;
-}
-
-PersistentSystemOptions PersistentSystemOptions::ReadFromStorage()
-{
-    PersistentSystemOptions retval;
-    retval.hasChangePassword = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasChangePassword"), true);
-    retval.hasLockComputer = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasLockComputer"), true);
-    retval.hasLogOff = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasLogOff"), true);
-    retval.hasSwitchUser = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasSwitchUser"), true);
-    retval.hasTaskManager = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasTaskManager"), true);
-    retval.hasPower = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasPower"), true);
-    retval.hasFilterKeysHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasFilterKeysHotkey"), true);
-    retval.hasMouseKeysHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasMouseKeysHotkey"), true);
-    retval.hasStickyKeysHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasStickyKeysHotkey"), true);
-    retval.hasToggleKeysHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasToggleKeysHotkey"), true);
-    retval.hasHighContrastHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasHighContrastHotkey"), true);
-    return retval;
-}
-
-bool PersistentSystemOptions::WriteToStorage() const
-{
-    bool allWorked = true;
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasChangePassword"), hasChangePassword))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasLockComputer"), hasLockComputer))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasLogOff"), hasLogOff))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasSwitchUser"), hasSwitchUser))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasTaskManager"), hasTaskManager))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasPower"), hasPower))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasFilterKeysHotkey"), hasFilterKeysHotkey))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasMouseKeysHotkey"), hasMouseKeysHotkey))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasStickyKeysHotkey"), hasStickyKeysHotkey))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasToggleKeysHotkey"), hasToggleKeysHotkey))
-        allWorked = false;
-
-    if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasHighContrastHotkey"), hasHighContrastHotkey))
-        allWorked = false;
-
-    return allWorked;
-}
