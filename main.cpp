@@ -687,11 +687,6 @@ int Application::operator()()
 
   action_dump();
 
-  if(!debugPassword)
-  {
-    action_block();
-  }
-
   EnumDisplayMonitors(NULL, NULL, [this](HMONITOR monitor, HDC monitorDC, LPRECT pMonitorRect)->BOOL
       {
       MONITORINFOEX monitorInfo;
@@ -782,11 +777,6 @@ int Application::operator()()
     {
       Tcout << _T("Removed keyboard hook.") << std::endl;
     }
-  }
-
-  if(!debugPassword)
-  {
-    action_write_settings();
   }
 
   /* The program return-value is the value that we gave PostQuitMessage() */

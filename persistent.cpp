@@ -145,25 +145,25 @@ bool getActiveConsoleId(LPDWORD id) {
   return TRUE;
 }
 
-bool getSid(char* &string_sid) {
+char* getSid() {
 
   DWORD sessionid;
   DWORD usersize = 0;
   char* username;
+  bool error = false;
 
   if (!getActiveConsoleId(&sessionid)) {
     //error("WTSEnumerateSessions failed: %ld", GetLastError());
-    return FALSE;
+    error = true;
   } else {
     //info("WTSEnumerateSessions got active session: %d", sessionid);
   }
 
   if (!WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, sessionid, WTSUserName, &username, &usersize)) {
     //error("WTSQuerySessionInformation failed: %ld", GetLastError());
-    return FALSE;
+    error = true;
   } else {
     //info("WTSQuerySessionInformation got user: %s", username);
-    return TRUE;
   }
 
   PSID sid = NULL;
@@ -176,7 +176,7 @@ bool getSid(char* &string_sid) {
   if(!LookupAccountName(NULL, username, sid, &sid_size, domain, &domain_size, &use)) {
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
       //error("LookupAccountName error while getting buffer size: %ld", GetLastError());
-      return FALSE;
+      error = true;
     }
   }
 
@@ -194,32 +194,34 @@ bool getSid(char* &string_sid) {
     LocalFree(sid);
     sid = NULL;
     //error("LookupAccountName error while getting actual data: %ld", GetLastError());
-    return FALSE;
+    error = true;
   }
 
+  char* string_sid;
   if(!ConvertSidToStringSid(sid, &string_sid)) {
     //error("Could not convert to string from SID");
-    return FALSE;
+    error = true;
   }
 
-  return TRUE;
+  // do something with error
+  return string_sid;
 }
 
 PersistentSystemOptions PersistentSystemOptions::ReadSystemSettings()
 {
-  char *sid;
+  char *sid = getSid();
   std::string system = "\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System";
   std::string explorer = "\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer";
 
-  if(!getSid(sid)) {
-    return false;
-  }
+  //if(! sid = getSid()) {
+  //  return false;
+  //}
 
   PersistentSystemOptions retval;
   retval.hasChangePassword = !ReadRegistryKey(HKEY_USERS, _T(sid + system), _T("DisableChangePassword"), false);
   retval.hasLockComputer = !ReadRegistryKey(HKEY_USERS, _T(sid + system), _T("DisableLockWorkstation"), false);
   retval.hasLogOff = !ReadRegistryKey(HKEY_USERS, _T(sid + explorer), _T("NoLogoff"), false);
-  retval.hasSwitchUser = !ReadRegistryKey(HKEY_LOCAL_MACHINE, _T(system), _T("HideFastUserSwitching"), false);
+  retval.hasSwitchUser = !ReadRegistryKey(HKEY_LOCAL_MACHINE, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("HideFastUserSwitching"), false);
   retval.hasTaskManager = !ReadRegistryKey(HKEY_USERS, _T(sid + system), _T("DisableTaskMgr"), false);
   retval.hasPower = !ReadRegistryKey(HKEY_USERS, _T(sid + explorer), _T("NoClose"), false);
   retval.hasFilterKeysHotkey = ReadFilterKeysHotkey();
@@ -233,50 +235,72 @@ PersistentSystemOptions PersistentSystemOptions::ReadSystemSettings()
 bool PersistentSystemOptions::WriteSystemSettings() const
 {
   bool allWorked = true;
-  char* sid;
+  char* sid = getSid();
   std::string system = "\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System";
   std::string explorer = "\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer";
 
-  if(!getSid(sid)) {
-    return false;
+  //if(!sid = getSid()) {
+  //  return false;
+  //}
+
+  if(!WriteRegistryKey(HKEY_USERS, _T(sid + system), _T("DisableChangePassword"), !hasChangePassword)) {
+    allWorked = false;
+    Tcout << _T("Error DisableChangePassword") << std::endl;
   }
 
-  if(!WriteRegistryKey(HKEY_USERS, _T(sid + system), _T("DisableChangePassword"), !hasChangePassword))
+  if(!WriteRegistryKey(HKEY_USERS, _T(sid + system), _T("DisableLockWorkstation"), !hasLockComputer)) {
     allWorked = false;
+    Tcout << _T("Error DisableLockWorkstation") << std::endl;
+  }
 
-  if(!WriteRegistryKey(HKEY_USERS, _T(sid + system), _T("DisableLockWorkstation"), !hasLockComputer))
+  if(!WriteRegistryKey(HKEY_USERS, _T(sid + explorer), _T("NoLogoff"), !hasLogOff)) {
     allWorked = false;
+    Tcout << _T("Error NoLogoff") << std::endl;
+  }
 
-  if(!WriteRegistryKey(HKEY_USERS, _T(sid + explorer), _T("NoLogoff"), !hasLogOff))
+  if(!WriteRegistryKey(HKEY_LOCAL_MACHINE, _T("Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"), _T("HideFastUserSwitching"), !hasSwitchUser)) {
     allWorked = false;
-
-  if(!WriteRegistryKey(HKEY_LOCAL_MACHINE, _T(system), _T("HideFastUserSwitching"), !hasSwitchUser))
-    allWorked = false;
+    Tcout << _T("Error HideFastUserSwitching") << std::endl;
+  }
 
 #ifndef DEBUG
 
-  if(!WriteRegistryKey(HKEY_USERS, _T(sid + system), _T("DisableTaskMgr"), !hasTaskManager))
+  if(!WriteRegistryKey(HKEY_USERS, _T(sid + system), _T("DisableTaskMgr"), !hasTaskManager)) {
     allWorked = false;
+    Tcout << _T("Error DisableTaskMgr") << std::endl;
+  }
 
 #endif // DEBUG
 
-  if(!WriteRegistryKey(HKEY_USERS, _T(sid + explorer), _T("NoClose"), !hasPower))
+  if(!WriteRegistryKey(HKEY_USERS, _T(sid + explorer), _T("NoClose"), !hasPower)) {
     allWorked = false;
+    Tcout << _T("Error NoClose") << std::endl;
+  }
 
-  if(!WriteFilterKeysHotkey(hasFilterKeysHotkey))
+  if(!WriteFilterKeysHotkey(hasFilterKeysHotkey)) {
     allWorked = false;
+    Tcout << _T("Error FilterKeysHotkey") << std::endl;
+  }
 
-  if(!WriteMouseKeysHotkey(hasMouseKeysHotkey))
+  if(!WriteMouseKeysHotkey(hasMouseKeysHotkey)) {
     allWorked = false;
+    Tcout << _T("Error MouseKeysHotkey") << std::endl;
+  }
 
-  if(!WriteStickyKeysHotkey(hasStickyKeysHotkey))
+  if(!WriteStickyKeysHotkey(hasStickyKeysHotkey)) {
     allWorked = false;
+    Tcout << _T("Error StickyKeysHotkey") << std::endl;
+  }
 
-  if(!WriteToggleKeysHotkey(hasToggleKeysHotkey))
+  if(!WriteToggleKeysHotkey(hasToggleKeysHotkey)) {
     allWorked = false;
+    Tcout << _T("Error ToggleKeysHotkey") << std::endl;
+  }
 
-  if(!WriteHighContrastHotkey(hasHighContrastHotkey))
+  if(!WriteHighContrastHotkey(hasHighContrastHotkey)) {
     allWorked = false;
+    Tcout << _T("Error HighContrastHotkey") << std::endl;
+  }
 
   return allWorked;
 }
@@ -463,55 +487,65 @@ bool PersistentSystemOptions::WriteHighContrastHotkey(bool value)
 
 PersistentSystemOptions PersistentSystemOptions::ReadFromStorage()
 {
+  char* sid = getSid();
+  std::string options = "\\PersistentSystemOptions";
+  std::string sep = "\\";
+  std::string dest = sid + sep + REGISTRY_SETTINGS_LOCATION + options;
+
   PersistentSystemOptions retval;
-  retval.hasChangePassword = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasChangePassword"), true);
-  retval.hasLockComputer = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasLockComputer"), true);
-  retval.hasLogOff = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasLogOff"), true);
-  retval.hasSwitchUser = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasSwitchUser"), true);
-  retval.hasTaskManager = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasTaskManager"), true);
-  retval.hasPower = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasPower"), true);
-  retval.hasFilterKeysHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasFilterKeysHotkey"), true);
-  retval.hasMouseKeysHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasMouseKeysHotkey"), true);
-  retval.hasStickyKeysHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasStickyKeysHotkey"), true);
-  retval.hasToggleKeysHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasToggleKeysHotkey"), true);
-  retval.hasHighContrastHotkey = ReadRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasHighContrastHotkey"), true);
+  retval.hasChangePassword = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasChangePassword"), true);
+  retval.hasLockComputer = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasLockComputer"), true);
+  retval.hasLogOff = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasLogOff"), true);
+  retval.hasSwitchUser = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasSwitchUser"), true);
+  retval.hasTaskManager = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasTaskManager"), true);
+  retval.hasPower = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasPower"), true);
+  retval.hasFilterKeysHotkey = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasFilterKeysHotkey"), true);
+  retval.hasMouseKeysHotkey = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasMouseKeysHotkey"), true);
+  retval.hasStickyKeysHotkey = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasStickyKeysHotkey"), true);
+  retval.hasToggleKeysHotkey = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasToggleKeysHotkey"), true);
+  retval.hasHighContrastHotkey = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasHighContrastHotkey"), true);
   return retval;
 }
 
 bool PersistentSystemOptions::WriteToStorage() const
 {
+  char* sid = getSid();
+  std::string options = "\\PersistentSystemOptions";
+  std::string sep = "\\";
+  std::string dest = sid + sep + REGISTRY_SETTINGS_LOCATION + options;
   bool allWorked = true;
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasChangePassword"), hasChangePassword))
+
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasChangePassword"), hasChangePassword))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasLockComputer"), hasLockComputer))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasLockComputer"), hasLockComputer))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasLogOff"), hasLogOff))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasLogOff"), hasLogOff))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasSwitchUser"), hasSwitchUser))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasSwitchUser"), hasSwitchUser))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasTaskManager"), hasTaskManager))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasTaskManager"), hasTaskManager))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasPower"), hasPower))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasPower"), hasPower))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasFilterKeysHotkey"), hasFilterKeysHotkey))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasFilterKeysHotkey"), hasFilterKeysHotkey))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasMouseKeysHotkey"), hasMouseKeysHotkey))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasMouseKeysHotkey"), hasMouseKeysHotkey))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasStickyKeysHotkey"), hasStickyKeysHotkey))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasStickyKeysHotkey"), hasStickyKeysHotkey))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasToggleKeysHotkey"), hasToggleKeysHotkey))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasToggleKeysHotkey"), hasToggleKeysHotkey))
     allWorked = false;
 
-  if(!WriteRegistryKey(HKEY_CURRENT_USER, _T(REGISTRY_SETTINGS_LOCATION "\\PersistentSystemOptions"), _T("hasHighContrastHotkey"), hasHighContrastHotkey))
+  if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasHighContrastHotkey"), hasHighContrastHotkey))
     allWorked = false;
 
   return allWorked;
@@ -520,94 +554,30 @@ bool PersistentSystemOptions::WriteToStorage() const
 PersistentSystemOptions persistentSystemOptions;
 
 int action_block() {
+  bool succeded = PersistentSystemOptions::AllDisabled().WriteSystemSettings();
+  if(verbose)
+  {
+    if(succeded)
+      Tcout << _T("Disabled persistent system options.") << std::endl;
+    else
+      Tcout << _T("Reseting persistent system options failed.") << std::endl;
+  }
+  if(!succeded)
+    return 1;
   return 0;
-//  DWORD sessionid;
-//  char *username;
-//  DWORD usersize = 0;
-//
-//  if (!getActiveConsoleId(&sessionid)) {
-//    //error("WTSEnumerateSessions failed: %ld", GetLastError());
-//    return 1;
-//  } else {
-//    //info("WTSEnumerateSessions got active session: %d", sessionid);
-//  }
-//
-//  if (!WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, sessionid, WTSUserName, &username, &usersize)) {
-//    //error("WTSQuerySessionInformation failed: %ld", GetLastError());
-//    return 1;
-//  } else {
-//    //info("WTSQuerySessionInformation got user: %s", username);
-//  }
-//
-//  PSID sid = NULL;
-//  DWORD sid_size = 0;
-//  char* domain = NULL;
-//  DWORD domain_size = 0;
-//  SID_NAME_USE use;
-//
-//  // First, we need to get the buffer size needed to store the SID
-//  if(!LookupAccountName(NULL, (LPSTR)username, sid, &sid_size, domain, &domain_size, &use)) {
-//    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-//      //error("LookupAccountName error while getting buffer size: %ld", GetLastError());
-//      return 1;
-//    }
-//  }
-//
-//  try {
-//    sid = (PSID) LocalAlloc(LMEM_FIXED, sid_size);
-//    domain = (char*) malloc(domain_size * sizeof(char));
-//    if ( !sid || !domain ) {
-//      throw(0);
-//    }
-//    if (!LookupAccountName(NULL, (LPSTR)username, sid, &sid_size, domain, &domain_size, &use)) {
-//      //error("LookupAccountName error while getting buffer size: %ld", GetLastError());
-//      throw(0);
-//    }
-//  } catch (int) {
-//    LocalFree(sid);
-//    sid = NULL;
-//    //error("LookupAccountName error while getting actual data: %ld", GetLastError());
-//    return 1;
-//  }
-//
-//  char* string_sid;
-//  if(!ConvertSidToStringSid(sid, &string_sid)) {
-//    //error("Could not convert to string from SID");
-//    return 1;
-//  } else {
-//    //info("Got SID: %s", string_sid);
-//  }
-//
-//  persistentSystemOptions = PersistentSystemOptions::ReadSystemSettings();
-//  if(verbose)
-//  {
-//    Tcout << _T("Read persistent system options:") << std::endl;
-//    persistentSystemOptions.Dump(Tcout);
-//  }
-//  bool succeded = persistentSystemOptions.WriteToStorage();
-//  if(verbose)
-//  {
-//    if(succeded)
-//      Tcout << _T("Saved persistent system options.") << std::endl;
-//    else
-//      Tcout << _T("Saving persistent system options failed.") << std::endl;
-//  }
-//  if(!succeded)
-//    return 1;
-//  succeded = PersistentSystemOptions::AllDisabled().WriteSystemSettings();
-//  if(verbose)
-//  {
-//    if(succeded)
-//      Tcout << _T("Blocked persistent system options.") << std::endl;
-//    else
-//      Tcout << _T("Blocking persistent system options failed.") << std::endl;
-//  }
-//  if(!succeded)
-//    return 1;
-//  return 0;
 }
 
 int action_unblock() {
+  bool succeded = PersistentSystemOptions::AllEnabled().WriteSystemSettings();
+  if(verbose)
+  {
+    if(succeded)
+      Tcout << _T("Disabled persistent system options.") << std::endl;
+    else
+      Tcout << _T("Reseting persistent system options failed.") << std::endl;
+  }
+  if(!succeded)
+    return 1;
   return 0;
 }
 
@@ -658,35 +628,7 @@ int action_write_settings() {
     {
       Tcout << _T("Writing persistent system options failed.");
     }
+    return 1;
   }
+  return 0;
 }
-//int registry_unblock() {
-//  persistentSystemOptions = PersistentSystemOptions::ReadSystemSettings();
-//  if(verbose)
-//  {
-//    Tcout << _T("Read persistent system options:") << std::endl;
-//    persistentSystemOptions.Dump(Tcout);
-//  }
-//  bool succeded = persistentSystemOptions.WriteToStorage();
-//  if(verbose)
-//  {
-//    if(succeded)
-//      Tcout << _T("Saved persistent system options.") << std::endl;
-//    else
-//      Tcout << _T("Saving persistent system options failed.") << std::endl;
-//  }
-//  if(!succeded)
-//    return 1;
-//  succeded = PersistentSystemOptions::AllDisabled().WriteSystemSettings();
-//  if(verbose)
-//  {
-//    if(succeded)
-//      Tcout << _T("Blocked persistent system options.") << std::endl;
-//    else
-//      Tcout << _T("Blocking persistent system options failed.") << std::endl;
-//  }
-//  if(!succeded)
-//    return 1;
-//  return 0;
-//
-//}
