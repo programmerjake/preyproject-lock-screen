@@ -1,16 +1,16 @@
 :: Copyright (c) 2015 Jacob Lifshay, Fork Ltd.
 :: This file is part of Prey.
-:: 
+::
 :: Prey is free software: you can redistribute it and/or modify
 :: it under the terms of the GNU General Public License as published by
 :: the Free Software Foundation, either version 3 of the License, or
 :: (at your option) any later version.
-:: 
+::
 :: Prey is distributed in the hope that it will be useful,
 :: but WITHOUT ANY WARRANTY; without even the implied warranty of
 :: MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 :: GNU General Public License for more details.
-:: 
+::
 :: You should have received a copy of the GNU General Public License
 :: along with Prey.  If not, see <http://www.gnu.org/licenses/>.
 ::
@@ -34,7 +34,7 @@
 :ZipSource
 @shift
 move /Y lock-screen-src.zip lock-screen-src.zip.bak 2>NUL
-zip lock-screen-src.zip -r external_libs res build.cmd *.cpp *.c *.h *.cbp *.rc 
+zip lock-screen-src.zip -r external_libs res build.cmd *.cpp *.c *.h *.cbp *.rc
 @goto parseargs
 
 :ZipAll
@@ -77,8 +77,9 @@ g++ -m32 -Lexternal_libs -o bin\Debug-x86\lock-screen.exe obj\Debug-x86\main.o o
 @shift
 @md obj\Release-x86 2>NUL
 windres -J rc -O coff -i lock-screen.rc -o obj\Release-x86\lock-screen.res
+g++ -m32 --std=c++11 -Lexternal_libs -c persistent.cpp -o obj\Release-x86\persistent.o -static -Os -ffunction-sections -fdata-sections -Wl,--gc-sections -lpropsys_x86 -w -lwtsapi32 -luserenv
 g++ -m32 -Wall -std=c++11 -municode -O2 -c main.cpp -o obj\Release-x86\main.o
 gcc -m32 -Wall -municode -O2 -c md5.c -o obj\Release-x86\md5.o
 @md bin\Release-x86 2>NUL
-g++ -m32 -Lexternal_libs -o bin\Release-x86\lock-screen.exe obj\Release-x86\main.o obj\Release-x86\md5.o obj\Release-x86\lock-screen.res -municode -static -s -lgdi32 -luser32 -lkernel32 -lcomctl32 -lole32 -lpropsys_x86
+g++ -m32 -Lexternal_libs -o bin\Release-x86\new-prey-lock.exe obj\Release-x86\main.o obj\Release-x86\md5.o obj\Release-x86\persistent.o obj\Release-x86\lock-screen.res -municode -static -s -lgdi32 -luser32 -lkernel32 -lcomctl32 -lole32 -lpropsys_x86 -lwtsapi32 -luserenv
 @goto parseargs
