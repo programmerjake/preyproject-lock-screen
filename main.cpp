@@ -45,6 +45,7 @@
 #include "string_cast.h"
 #include "get_option.h"
 
+
 #define REGISTRY_SETTINGS_LOCATION "Software\\Prey\\lock-screen"
 
 #ifndef ERROR_ELEVATION_REQUIRED
@@ -104,8 +105,13 @@ class MD5 final
       std::uint8_t data[dataSize];
       static bool parse(tstring str, Hash &retval)
       {
+        str.erase(std::remove(str.begin(), str.end(), '"'), str.end());
         if(str.size() != 2 * dataSize)
-          return false;
+        {
+            return false;
+        }
+
+
 
         for(std::size_t i = 0; i < dataSize; i++)
         {
@@ -244,6 +250,7 @@ class Application final
     const HINSTANCE instance;
     const int nCmdShow;
     std::unordered_map<HWND, Window> windows;
+    std::unordered_map<HMONITOR, HWND> monitors;
     HWND passwordControl;
     HWND unlockControl;
     HWND startKeyboardControl;
@@ -261,6 +268,7 @@ class Application final
     HBITMAP backgroundImageError;
     std::vector<tstring> args;
     bool verbose = false;
+    bool primaryCreated = false;
     enum class Action
     {
       LockScreen,
@@ -540,6 +548,7 @@ int Application::operator()()
     else if(argumentsLeft == 1)
     {
       password = args[optionParser.optind];
+
     }
   }
 
@@ -687,6 +696,12 @@ int Application::operator()()
 
   action_dump();
 
+  DWORD sessId = WTSGetActiveConsoleSessionId();
+
+  while (sessId == 0)
+  {
+    sessId = WTSGetActiveConsoleSessionId();
+  }
   EnumDisplayMonitors(NULL, NULL, [this](HMONITOR monitor, HDC monitorDC, LPRECT pMonitorRect)->BOOL
       {
       MONITORINFOEX monitorInfo;
@@ -695,7 +710,7 @@ int Application::operator()()
       CreateData createData;
       createData.initWindow = Window((monitorInfo.dwFlags & MONITORINFOF_PRIMARY) == MONITORINFOF_PRIMARY);
       createData.application = this;
-      CreateWindowEx(
+      HWND handle = CreateWindowEx(
 #ifdef DEBUG
           0,
 #else
@@ -712,6 +727,7 @@ int Application::operator()()
           NULL,
           instance,
           (LPVOID)&createData);
+      monitors.emplace(monitor, handle);
       if(verbose)
       {
         Tcout << _T("Created window for monitor: ") << monitorInfo.szDevice << _T(" (") << pMonitorRect->left << _T(", ") << pMonitorRect->top << _T(")-(") << pMonitorRect->right << _T(", ") << pMonitorRect->bottom << _T(")") << std::endl;
@@ -719,7 +735,7 @@ int Application::operator()()
       return TRUE;
       });
 
-
+  primaryCreated = true;
   /* Make the window visible on the screen */
   for(auto i : windows)
   {
@@ -787,8 +803,15 @@ LRESULT CALLBACK Application::StaticWindowProcedure(HWND hwnd, UINT messageId, W
 {
   Application *application = (Application *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 
+
   if(application)
   {
+    if (application->windows.find(hwnd) == application->windows.end())
+    {
+        LPCREATESTRUCT createStruct = (LPCREATESTRUCT)lParam;
+        CreateData *createData = (CreateData *)createStruct->lpCreateParams;
+        application->windows.emplace(hwnd, createData->initWindow);
+    }
     Window &window = application->windows.at(hwnd);
     return application->WindowProcedure(window, messageId, wParam, lParam);
   }
@@ -909,6 +932,63 @@ LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wPar
       PostQuitMessage(66);  /* send a WM_QUIT to the message queue */
       EnableTouchKeyboard(window, false);
       break;
+    case WM_DISPLAYCHANGE:
+    {
+      EnumDisplayMonitors(NULL, NULL, [this, lParam, window ](HMONITOR monitor, HDC monitorDC, LPRECT pMonitorRect)->BOOL
+          {
+            if (monitors.find(monitor) == monitors.end())
+            {
+              MONITORINFOEX monitorInfo;
+              monitorInfo.cbSize = sizeof(monitorInfo);
+              GetMonitorInfo(monitor, &monitorInfo);
+              if ((monitorInfo.dwFlags & MONITORINFOF_PRIMARY) != MONITORINFOF_PRIMARY)
+              {
+                  CreateData createData;
+                  createData.initWindow = Window((monitorInfo.dwFlags & MONITORINFOF_PRIMARY) == MONITORINFOF_PRIMARY);
+                  createData.application = this;
+                  HWND handle = CreateWindowEx(
+                #ifdef DEBUG
+                      0,
+                #else
+                      WS_EX_TOPMOST,
+                #endif
+                      className,
+                      _T("Lock Screen"),
+                      WS_POPUP,
+                      pMonitorRect->left,
+                      pMonitorRect->top,
+                      pMonitorRect->right - pMonitorRect->left,
+                      pMonitorRect->bottom - pMonitorRect->top,
+                      HWND_DESKTOP,
+                      NULL,
+                      instance,
+                      (LPVOID)&createData);
+                  if (handle == NULL)
+                  {
+                      wchar_t err[256];
+                      FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(),
+                                    MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), err, 255, NULL);
+                      Tcerr << _T("error ")  << err << std::endl;
+                  }
+                  else
+                  {
+
+                      windows.emplace(handle, window);
+
+                      monitors.emplace(monitor, handle);
+                      ShowWindow(handle, nCmdShow);
+                      if(verbose)
+                      {
+                        Tcout << _T("Created window for monitor: ") << monitorInfo.szDevice << _T(" (") << pMonitorRect->left << _T(", ") << pMonitorRect->top << _T(")-(") << pMonitorRect->right << _T(", ") << pMonitorRect->bottom << _T(")") << std::endl;
+                      }
+                  }
+
+                }
+              }
+                return TRUE;
+             });
+            break;
+    }
 
     case WM_ERASEBKGND:
       return 0;
@@ -1329,4 +1409,5 @@ bool Application::IsWow64Process()
 
   return retval ? true : false;
 }
+
 
