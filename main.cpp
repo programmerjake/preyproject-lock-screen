@@ -695,6 +695,8 @@ int Application::operator()()
   }
 
   action_dump();
+  action_save();
+  action_block();
 
   DWORD sessId = WTSGetActiveConsoleSessionId();
 
@@ -794,6 +796,7 @@ int Application::operator()()
       Tcout << _T("Removed keyboard hook.") << std::endl;
     }
   }
+  action_unblock();
 
   /* The program return-value is the value that we gave PostQuitMessage() */
   return message.wParam;

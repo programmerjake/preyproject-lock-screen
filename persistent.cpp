@@ -128,6 +128,7 @@ struct PersistentSystemOptions final
   static bool WriteHighContrastHotkey(bool value);
   static bool ReadFastBootHotkey();
   static bool WriteFastBootHotkey(bool value);
+  
 };
 
 bool getActiveConsoleId(LPDWORD id) {
@@ -300,7 +301,7 @@ bool PersistentSystemOptions::WriteSystemSettings() const
     allWorked = false;
     Tcout << _T("Error StickyKeysHotkey") << std::endl;
   }
-
+      
   if(!WriteToggleKeysHotkey(hasToggleKeysHotkey)) {
     allWorked = false;
     Tcout << _T("Error ToggleKeysHotkey") << std::endl;
@@ -641,6 +642,15 @@ int action_save() {
   if(!succeded)
     return 1;
   return 0;
+}
+
+int action_load() {
+  persistentSystemOptions = PersistentSystemOptions::ReadFromStorage();
+  if(verbose)
+  {
+    Tcout << _T("Read persistent system options from storage:") << std::endl;
+    persistentSystemOptions.Dump(Tcout);
+  }
 }
 
 int action_write_settings() {

@@ -43,11 +43,11 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "CompanyName", "Fork, Ltd."
+      VALUE "CompanyName", "Prey, Inc."
       VALUE "FileDescription", "Fullscreen Lock"
       VALUE "FileVersion", VERSION_NUMBER_STRING
       VALUE "InternalName", "lock-screen"
-      VALUE "LegalCopyright", "(c) 2014-2015 Fork, Ltd."
+      VALUE "LegalCopyright", "(c) 2014-2017 Prey, Inc."
       VALUE "OriginalFilename", "screen-lock.exe"
       VALUE "ProductName", "Fullscreen Lock"
       VALUE "ProductVersion", VERSION_NUMBER_STRING
