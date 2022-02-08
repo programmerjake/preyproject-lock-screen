@@ -42,6 +42,7 @@
 #include "resources.h"
 #include "persistent.h"
 #include "md5.h"
+#include "base64.h"
 #include "string_cast.h"
 #include "get_option.h"
 
@@ -217,7 +218,8 @@ class MD5 final
 MD5::Hash hashPassword(tstring password)
 {
   std::string utf8password = string_cast<std::string>(password);
-  return MD5::hash((const std::uint8_t *)utf8password.data(), utf8password.size());
+  std::string b64_encoded = base64_encode(reinterpret_cast<const unsigned char*>(utf8password.c_str()), utf8password.length());
+  return MD5::hash((const std::uint8_t *)b64_encoded.data(), b64_encoded.size());
 }
 
 struct Window final
@@ -251,7 +253,9 @@ class Application final
     const int nCmdShow;
     std::unordered_map<HWND, Window> windows;
     std::unordered_map<HMONITOR, HWND> monitors;
+    tstring textMessage;
     HWND passwordControl;
+    HWND passwordControl2;
     HWND unlockControl;
     HWND startKeyboardControl;
     HWND backgroundImageControl;
@@ -534,6 +538,8 @@ int Application::operator()()
     }
 
     std::size_t argumentsLeft = args.size() - optionParser.optind;
+
+    /*
     if(actionSpecificationCount > 0)
     {
       if(argumentsLeft > 0)
@@ -550,6 +556,16 @@ int Application::operator()()
       password = args[optionParser.optind];
 
     }
+    */
+    if (argumentsLeft > 1) {
+      password = args[1];
+      textMessage = args[2];
+    }
+    else if(argumentsLeft == 1) {
+      password = args[1];
+      textMessage = _T("");
+    }
+
   }
 
   if(!isHelpOption)
@@ -851,7 +867,7 @@ LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wPar
               NULL,
               WS_CHILD | WS_VISIBLE | SS_BITMAP | SS_CENTERIMAGE,
               windowCenter.x - 162,
-              windowCenter.y - 207,
+              windowCenter.y - 253,
               324,
               374,
               window.window,
@@ -877,6 +893,31 @@ LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wPar
               (HMENU)passwordControlId,
               instance,
               NULL);
+
+          textMessage.erase(remove( textMessage.begin(), textMessage.end(), '\"' ),textMessage.end());
+          std::wstring stemp = std::wstring(textMessage.begin(), textMessage.end());
+
+          LPCWSTR sw = stemp.c_str();
+          SIZE editSize2 = {400, 200};
+
+          RECT editRect2;
+          editRect2.left = windowCenter.x - 150 - editSize2.cx / 2;
+          editRect2.right = editRect.left + 100 + editSize2.cx;
+          editRect2.top = windowCenter.y + 160 - editSize2.cy / 2;
+          editRect2.bottom = editRect.top + 100 + editSize2.cy;
+          passwordControl2 = CreateWindowEx(0,
+              _T("STATIC"),
+              sw,
+              WS_CHILD | WS_VISIBLE | WS_TABSTOP | SS_CENTER,
+              editRect2.left,
+              editRect2.top,
+              editRect2.right - editRect2.left,
+              editRect2.bottom - editRect2.top,
+              window.window,
+              (HMENU)passwordControlId,
+              instance,
+              NULL);
+
           LOGFONT passwordControlFontDescriptor;
           GetObject(GetStockObject(DEFAULT_GUI_FONT), sizeof(passwordControlFontDescriptor), &passwordControlFontDescriptor);
           passwordControlFontDescriptor.lfWidth = 0;
@@ -1089,6 +1130,14 @@ LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wPar
         }
 
         break;
+      }
+
+    case WM_CTLCOLORSTATIC:
+      {
+        HDC hdcStatic = (HDC) wParam;
+        SetTextColor(hdcStatic, RGB(255,255,255));
+        SetBkColor(hdcStatic, RGB(0,0,0));
+        return (INT_PTR)CreateSolidBrush(RGB(0,0,0));
       }
 
     case WM_PAINT:
