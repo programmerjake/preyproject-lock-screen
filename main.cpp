@@ -777,6 +777,7 @@ int Application::operator()()
 
   for(BOOL retval = GetMessage(&message, NULL, 0, 0); retval != 0; retval = GetMessage(&message, NULL, 0, 0))
   {
+    SetFocus(passwordControl);
     if(retval == -1)
     {
       return 1;
