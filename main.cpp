@@ -22,7 +22,10 @@
 #define UNICODE
 #endif
 #define NOMINMAX
+
 #include <windows.h>
+#include <Winable.h>
+#include <winuser.h>
 #include <wtsapi32.h>
 #include <tchar.h>
 #include <sddl.h>
@@ -39,9 +42,11 @@
 #include <cctype>
 #include <iostream>
 #include <initializer_list>
+#include <ctime>
 #include "resources.h"
 #include "persistent.h"
 #include "md5.h"
+#include "base64.h"
 #include "string_cast.h"
 #include "get_option.h"
 
@@ -217,7 +222,8 @@ class MD5 final
 MD5::Hash hashPassword(tstring password)
 {
   std::string utf8password = string_cast<std::string>(password);
-  return MD5::hash((const std::uint8_t *)utf8password.data(), utf8password.size());
+  std::string b64_encoded = base64_encode(reinterpret_cast<const unsigned char*>(utf8password.c_str()), utf8password.length());
+  return MD5::hash((const std::uint8_t *)b64_encoded.data(), b64_encoded.size());
 }
 
 struct Window final
@@ -242,7 +248,9 @@ class Application final
     static LRESULT CALLBACK StaticWindowProcedure(HWND window, UINT messageId, WPARAM wParam, LPARAM lParam);
     LRESULT WindowProcedure(Window &window, UINT messageId, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK StaticKeyboardHookProcedure(int nCode, WPARAM wParam, LPARAM lParam);
+    static LRESULT CALLBACK mouseProc(HWND window, int nCode, WPARAM wParam, LPARAM lParam);
     static HRESULT EnableWindowSystemTouchGestures(HWND window, bool enabled);
+    LRESULT OnTouch(HWND hWnd, WPARAM wParam, LPARAM lParam);
     void EnableTouchKeyboard(Window &parentWindow, bool enabled);
     bool IsWow64Process();
     bool ParseArgumentsAndCheckForHelpOption();
@@ -251,7 +259,9 @@ class Application final
     const int nCmdShow;
     std::unordered_map<HWND, Window> windows;
     std::unordered_map<HMONITOR, HWND> monitors;
+    tstring textMessage;
     HWND passwordControl;
+    HWND passwordControl2;
     HWND unlockControl;
     HWND startKeyboardControl;
     HWND backgroundImageControl;
@@ -260,6 +270,7 @@ class Application final
     static constexpr UINT startKeyboardControlId = 102;
     static constexpr UINT backgroundImageControlId = 103;
     HHOOK keyboardHook;
+    HHOOK hMouseHook;
     HICON keyboardIcon;
     MD5::Hash hashedPassword;
     bool debugPassword = false;
@@ -534,6 +545,8 @@ int Application::operator()()
     }
 
     std::size_t argumentsLeft = args.size() - optionParser.optind;
+
+    /*
     if(actionSpecificationCount > 0)
     {
       if(argumentsLeft > 0)
@@ -550,6 +563,16 @@ int Application::operator()()
       password = args[optionParser.optind];
 
     }
+    */
+    if (argumentsLeft > 1) {
+      password = args[1];
+      textMessage = args[2];
+    }
+    else if(argumentsLeft == 1) {
+      password = args[1];
+      textMessage = _T("");
+    }
+
   }
 
   if(!isHelpOption)
@@ -695,6 +718,8 @@ int Application::operator()()
   }
 
   action_dump();
+  action_save();
+  action_block();
 
   DWORD sessId = WTSGetActiveConsoleSessionId();
 
@@ -745,6 +770,7 @@ int Application::operator()()
   SetFocus(passwordControl);
 
   keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, StaticKeyboardHookProcedure, NULL, 0);
+  
   if(verbose && keyboardHook != NULL)
   {
     Tcout << _T("Installed keyboard hook.") << std::endl;
@@ -756,9 +782,48 @@ int Application::operator()()
 
   /* Run the message loop. It will run until GetMessage() returns 0 */
   MSG message;
+  std::time_t time = std::time(0);
+  //std::time_t timePointer = std::time(0);
+  //POINT pointBefore;
+  //POINT pointAfter;
+  //bool bloqueado = false;
+  //GetCursorPos(&pointBefore);
+  int value = GetSystemMetrics(SM_DIGITIZER);
+  
+  std::cout << value;
+  if (value & NID_READY){ /* stack ready */}
+  if (value  & NID_MULTI_INPUT){
+      /* digitizer is multitouch */ 
+    std::cout << "MULTIPLE TOUCH!!!!\n";
+  }
+  if (value & NID_INTEGRATED_TOUCH){
+    /* Integrated touch */
+    std::cout << "INTEGRATED TOUCH!!!!\n";
+  }
+  //RegisterTouchWindow(GetActiveWindow(), 0);
+  INPUT Inputs[3] = {0};
 
+  Inputs[0].type = INPUT_MOUSE;
+  Inputs[0].mi.dx = 0; // desired X coordinate
+  Inputs[0].mi.dy = 0; // desired Y coordinate
+  Inputs[0].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+
+  Inputs[1].type = INPUT_MOUSE;
+  Inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+
+  Inputs[2].type = INPUT_MOUSE;
+  Inputs[2].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+  SetFocus(passwordControl);
+  SendInput(3, Inputs, sizeof(INPUT));
+  //hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, NULL, 0);
   for(BOOL retval = GetMessage(&message, NULL, 0, 0); retval != 0; retval = GetMessage(&message, NULL, 0, 0))
   {
+    if(difftime(std::time(0), time) >= 10){
+      std::cout << "SET FOCUS!!!!\n";
+      SetFocus(passwordControl);
+      SendInput(3, Inputs, sizeof(INPUT));
+      time = std::time(0);
+    }
     if(retval == -1)
     {
       return 1;
@@ -794,6 +859,7 @@ int Application::operator()()
       Tcout << _T("Removed keyboard hook.") << std::endl;
     }
   }
+  action_unblock();
 
   /* The program return-value is the value that we gave PostQuitMessage() */
   return message.wParam;
@@ -848,7 +914,7 @@ LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wPar
               NULL,
               WS_CHILD | WS_VISIBLE | SS_BITMAP | SS_CENTERIMAGE,
               windowCenter.x - 162,
-              windowCenter.y - 207,
+              windowCenter.y - 253,
               324,
               374,
               window.window,
@@ -874,6 +940,31 @@ LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wPar
               (HMENU)passwordControlId,
               instance,
               NULL);
+
+          textMessage.erase(remove( textMessage.begin(), textMessage.end(), '\"' ),textMessage.end());
+          std::wstring stemp = std::wstring(textMessage.begin(), textMessage.end());
+
+          LPCWSTR sw = stemp.c_str();
+          SIZE editSize2 = {400, 200};
+
+          RECT editRect2;
+          editRect2.left = windowCenter.x - 150 - editSize2.cx / 2;
+          editRect2.right = editRect.left + 100 + editSize2.cx;
+          editRect2.top = windowCenter.y + 160 - editSize2.cy / 2;
+          editRect2.bottom = editRect.top + 100 + editSize2.cy;
+          passwordControl2 = CreateWindowEx(0,
+              _T("STATIC"),
+              sw,
+              WS_CHILD | WS_VISIBLE | WS_TABSTOP | SS_CENTER,
+              editRect2.left,
+              editRect2.top,
+              editRect2.right - editRect2.left,
+              editRect2.bottom - editRect2.top,
+              window.window,
+              (HMENU)passwordControlId,
+              instance,
+              NULL);
+
           LOGFONT passwordControlFontDescriptor;
           GetObject(GetStockObject(DEFAULT_GUI_FONT), sizeof(passwordControlFontDescriptor), &passwordControlFontDescriptor);
           passwordControlFontDescriptor.lfWidth = 0;
@@ -1088,6 +1179,14 @@ LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wPar
         break;
       }
 
+    case WM_CTLCOLORSTATIC:
+      {
+        HDC hdcStatic = (HDC) wParam;
+        SetTextColor(hdcStatic, RGB(255,255,255));
+        SetBkColor(hdcStatic, RGB(0,0,0));
+        return (INT_PTR)CreateSolidBrush(RGB(0,0,0));
+      }
+
     case WM_PAINT:
       {
         PAINTSTRUCT ps;
@@ -1117,7 +1216,9 @@ LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wPar
 
         break;
       }
-
+    /* case 0x240:
+      OnTouch(window.window, wParam, lParam);
+      break;*/ 
     default: /* for messages that we don't deal with */
       return DefWindowProc(window.window, messageId, wParam, lParam);
   }

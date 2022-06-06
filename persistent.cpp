@@ -53,6 +53,7 @@ struct PersistentSystemOptions final
   bool hasStickyKeysHotkey;
   bool hasToggleKeysHotkey;
   bool hasHighContrastHotkey;
+  bool hasFastBootHotKey;
   PersistentSystemOptions(bool enabled = true)
     : hasLockComputer(enabled),
     hasSwitchUser(enabled),
@@ -64,6 +65,7 @@ struct PersistentSystemOptions final
     hasMouseKeysHotkey(enabled),
     hasStickyKeysHotkey(enabled),
     hasToggleKeysHotkey(enabled),
+    hasFastBootHotKey(enabled),
     hasHighContrastHotkey(enabled)
   {
   }
@@ -92,6 +94,7 @@ struct PersistentSystemOptions final
     os << "hasStickyKeysHotkey = " << (hasStickyKeysHotkey ? "true\n" : "false\n");
     os << "hasToggleKeysHotkey = " << (hasToggleKeysHotkey ? "true\n" : "false\n");
     os << "hasHighContrastHotkey = " << (hasHighContrastHotkey ? "true\n" : "false\n");
+    os << "hasFastBootHotkey = " << (hasFastBootHotKey ? "true\n" : "false\n");
     return os;
   }
   std::wostream &Dump(std::wostream &os) const
@@ -107,6 +110,7 @@ struct PersistentSystemOptions final
     os << L"hasStickyKeysHotkey = " << (hasStickyKeysHotkey ? L"true\n" : L"false\n");
     os << L"hasToggleKeysHotkey = " << (hasToggleKeysHotkey ? L"true\n" : L"false\n");
     os << L"hasHighContrastHotkey = " << (hasHighContrastHotkey ? L"true\n" : L"false\n");
+    os << L"hasFastBootHotkey = " << (hasFastBootHotKey ? L"true\n" : L"false\n");
     return os;
   }
   private:
@@ -122,6 +126,9 @@ struct PersistentSystemOptions final
   static bool WriteToggleKeysHotkey(bool value);
   static bool ReadHighContrastHotkey();
   static bool WriteHighContrastHotkey(bool value);
+  static bool ReadFastBootHotkey();
+  static bool WriteFastBootHotkey(bool value);
+  
 };
 
 bool getActiveConsoleId(LPDWORD id) {
@@ -212,6 +219,7 @@ PersistentSystemOptions PersistentSystemOptions::ReadSystemSettings()
   char *sid = getSid();
   std::string system = "\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System";
   std::string explorer = "\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer";
+  std::string power = "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power";
 
   //if(! sid = getSid()) {
   //  return false;
@@ -229,6 +237,7 @@ PersistentSystemOptions PersistentSystemOptions::ReadSystemSettings()
   retval.hasStickyKeysHotkey = ReadStickyKeysHotkey();
   retval.hasToggleKeysHotkey = ReadToggleKeysHotkey();
   retval.hasHighContrastHotkey = ReadHighContrastHotkey();
+  retval.hasFastBootHotKey = !ReadRegistryKey(HKEY_LOCAL_MACHINE, _T("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power"), _T("HiberbootEnabled"), false);
   return retval;
 }
 
@@ -238,6 +247,7 @@ bool PersistentSystemOptions::WriteSystemSettings() const
   char* sid = getSid();
   std::string system = "\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System";
   std::string explorer = "\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer";
+  std::string power = "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power";
 
   //if(!sid = getSid()) {
   //  return false;
@@ -291,7 +301,7 @@ bool PersistentSystemOptions::WriteSystemSettings() const
     allWorked = false;
     Tcout << _T("Error StickyKeysHotkey") << std::endl;
   }
-
+      
   if(!WriteToggleKeysHotkey(hasToggleKeysHotkey)) {
     allWorked = false;
     Tcout << _T("Error ToggleKeysHotkey") << std::endl;
@@ -300,6 +310,11 @@ bool PersistentSystemOptions::WriteSystemSettings() const
   if(!WriteHighContrastHotkey(hasHighContrastHotkey)) {
     allWorked = false;
     Tcout << _T("Error HighContrastHotkey") << std::endl;
+  }
+  
+ if(!WriteRegistryKey(HKEY_LOCAL_MACHINE, _T("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power"), _T("HiberbootEnabled"), hasFastBootHotKey)) {
+    allWorked = false;
+    Tcout << _T("Error FastBootHotKey") << std::endl;
   }
 
   return allWorked;
@@ -485,6 +500,7 @@ bool PersistentSystemOptions::WriteHighContrastHotkey(bool value)
   return true;
 }
 
+
 PersistentSystemOptions PersistentSystemOptions::ReadFromStorage()
 {
   char* sid = getSid();
@@ -504,6 +520,7 @@ PersistentSystemOptions PersistentSystemOptions::ReadFromStorage()
   retval.hasStickyKeysHotkey = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasStickyKeysHotkey"), true);
   retval.hasToggleKeysHotkey = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasToggleKeysHotkey"), true);
   retval.hasHighContrastHotkey = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasHighContrastHotkey"), true);
+  retval.hasFastBootHotKey = ReadRegistryKey(HKEY_USERS, _T(dest), _T("hasFastBootHotkey"), true);
   return retval;
 }
 
@@ -547,6 +564,9 @@ bool PersistentSystemOptions::WriteToStorage() const
 
   if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasHighContrastHotkey"), hasHighContrastHotkey))
     allWorked = false;
+    
+   if(!WriteRegistryKey(HKEY_USERS, _T(dest), _T("hasFastBootHotkey"), !hasFastBootHotKey))
+    allWorked = false;
 
   return allWorked;
 }
@@ -554,6 +574,7 @@ bool PersistentSystemOptions::WriteToStorage() const
 PersistentSystemOptions persistentSystemOptions;
 
 int action_block() {
+  ShowWindow(FindWindow("Shell_TrayWnd",""), SW_HIDE);
   bool succeded = PersistentSystemOptions::AllDisabled().WriteSystemSettings();
   if(verbose)
   {
@@ -568,6 +589,7 @@ int action_block() {
 }
 
 int action_unblock() {
+  ShowWindow(FindWindow("Shell_TrayWnd",""), SW_SHOW);
   bool succeded = PersistentSystemOptions::AllEnabled().WriteSystemSettings();
   if(verbose)
   {
@@ -588,6 +610,7 @@ int action_dump() {
 }
 
 int action_force_unblock() {
+	ShowWindow(FindWindow("Shell_TrayWnd",""), SW_SHOW);
   bool succeded = PersistentSystemOptions::AllEnabled().WriteSystemSettings();
   if(verbose)
   {
@@ -619,6 +642,15 @@ int action_save() {
   if(!succeded)
     return 1;
   return 0;
+}
+
+int action_load() {
+  persistentSystemOptions = PersistentSystemOptions::ReadFromStorage();
+  if(verbose)
+  {
+    Tcout << _T("Read persistent system options from storage:") << std::endl;
+    persistentSystemOptions.Dump(Tcout);
+  }
 }
 
 int action_write_settings() {
