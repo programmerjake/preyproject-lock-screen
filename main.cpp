@@ -22,7 +22,10 @@
 #define UNICODE
 #endif
 #define NOMINMAX
+
 #include <windows.h>
+#include <Winable.h>
+#include <winuser.h>
 #include <wtsapi32.h>
 #include <tchar.h>
 #include <sddl.h>
@@ -39,6 +42,7 @@
 #include <cctype>
 #include <iostream>
 #include <initializer_list>
+#include <ctime>
 #include "resources.h"
 #include "persistent.h"
 #include "md5.h"
@@ -244,7 +248,9 @@ class Application final
     static LRESULT CALLBACK StaticWindowProcedure(HWND window, UINT messageId, WPARAM wParam, LPARAM lParam);
     LRESULT WindowProcedure(Window &window, UINT messageId, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK StaticKeyboardHookProcedure(int nCode, WPARAM wParam, LPARAM lParam);
+    static LRESULT CALLBACK mouseProc(HWND window, int nCode, WPARAM wParam, LPARAM lParam);
     static HRESULT EnableWindowSystemTouchGestures(HWND window, bool enabled);
+    LRESULT OnTouch(HWND hWnd, WPARAM wParam, LPARAM lParam);
     void EnableTouchKeyboard(Window &parentWindow, bool enabled);
     bool IsWow64Process();
     bool ParseArgumentsAndCheckForHelpOption();
@@ -264,6 +270,7 @@ class Application final
     static constexpr UINT startKeyboardControlId = 102;
     static constexpr UINT backgroundImageControlId = 103;
     HHOOK keyboardHook;
+    HHOOK hMouseHook;
     HICON keyboardIcon;
     MD5::Hash hashedPassword;
     bool debugPassword = false;
@@ -763,6 +770,7 @@ int Application::operator()()
   SetFocus(passwordControl);
 
   keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, StaticKeyboardHookProcedure, NULL, 0);
+  
   if(verbose && keyboardHook != NULL)
   {
     Tcout << _T("Installed keyboard hook.") << std::endl;
@@ -774,10 +782,48 @@ int Application::operator()()
 
   /* Run the message loop. It will run until GetMessage() returns 0 */
   MSG message;
+  std::time_t time = std::time(0);
+  //std::time_t timePointer = std::time(0);
+  //POINT pointBefore;
+  //POINT pointAfter;
+  //bool bloqueado = false;
+  //GetCursorPos(&pointBefore);
+  int value = GetSystemMetrics(SM_DIGITIZER);
+  
+  std::cout << value;
+  if (value & NID_READY){ /* stack ready */}
+  if (value  & NID_MULTI_INPUT){
+      /* digitizer is multitouch */ 
+    std::cout << "MULTIPLE TOUCH!!!!\n";
+  }
+  if (value & NID_INTEGRATED_TOUCH){
+    /* Integrated touch */
+    std::cout << "INTEGRATED TOUCH!!!!\n";
+  }
+  //RegisterTouchWindow(GetActiveWindow(), 0);
+  INPUT Inputs[3] = {0};
 
+  Inputs[0].type = INPUT_MOUSE;
+  Inputs[0].mi.dx = 0; // desired X coordinate
+  Inputs[0].mi.dy = 0; // desired Y coordinate
+  Inputs[0].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+
+  Inputs[1].type = INPUT_MOUSE;
+  Inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+
+  Inputs[2].type = INPUT_MOUSE;
+  Inputs[2].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+  SetFocus(passwordControl);
+  SendInput(3, Inputs, sizeof(INPUT));
+  //hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, NULL, 0);
   for(BOOL retval = GetMessage(&message, NULL, 0, 0); retval != 0; retval = GetMessage(&message, NULL, 0, 0))
   {
-    SetFocus(passwordControl);
+    if(difftime(std::time(0), time) >= 10){
+      std::cout << "SET FOCUS!!!!\n";
+      SetFocus(passwordControl);
+      SendInput(3, Inputs, sizeof(INPUT));
+      time = std::time(0);
+    }
     if(retval == -1)
     {
       return 1;
@@ -1170,7 +1216,9 @@ LRESULT Application::WindowProcedure(Window &window, UINT messageId, WPARAM wPar
 
         break;
       }
-
+    /* case 0x240:
+      OnTouch(window.window, wParam, lParam);
+      break;*/ 
     default: /* for messages that we don't deal with */
       return DefWindowProc(window.window, messageId, wParam, lParam);
   }
